@@ -1,0 +1,20 @@
+# runs/mt11/meta.json det_classes 순서 그대로 (변경 금지)
+base_skincare
+beauty blender
+blush
+bronzer
+brush
+concealer
+eyelash_item
+eye liner
+eye shade
+highlighter
+lip balm
+lip gloss
+lip liner
+lipstick
+mascara
+nail polish
+nail polish remover
+powder
+tint

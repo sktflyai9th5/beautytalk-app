@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────
+# BeautyTalk 앱 (Flutter)
+# 백엔드는 server/.gitignore 가 따로 담당한다.
+# ─────────────────────────────────────────────────────────────
+
+# Flutter / Dart / Pub
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+**/build/
+/coverage/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+
+# Android
+.gradle/
+/android/.gradle/
+/android/app/debug
+/android/app/profile
+/android/app/release
+/android/local.properties
+
+# 서명 키 — 절대 커밋하지 말 것
+/android/key.properties
+*.jks
+*.keystore
+
+# 심볼 / 난독화 산출물
+app.*.symbols
+app.*.map.json
+
+# 빌드 결과물
+*.apk
+*.aab
+
+# 에디터 · IDE
+*.iml
+*.ipr
+*.iws
+.idea/
+# .vscode 는 실행 설정을 공유하고 싶을 수 있어 기본으로 열어 둔다
+#.vscode/
+
+# 도구 스크립트(tools/) 파이썬 캐시
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# 로컬 도구 설정
+.claude/settings.local.json
+
+# 로그 · 임시 파일
+*.log
+*.swp
+.history
+migrate_working_dir/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 실제 인물이 찍힌 사진 — 저장소에 올리지 않는다.
+# 연출 프리뷰(lib/preview_main.dart)와 홀로그램 테스트가 이 파일을 쓴다.
+# 클론한 뒤 직접 얼굴 사진을 넣고 tools/hologram 으로 격자를 다시 뽑을 것.
+assets/hologram/demo_face.jpg
+
+# 백엔드는 별도 저장소로 관리한다 — sktflyai9th5/beautytalk-backend
+# 로컬에서는 server/ 를 그대로 두고 쓰되, 앱 저장소에는 커밋하지 않는다.
+/server/

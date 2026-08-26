@@ -1,0 +1,5 @@
+# 모델·이미지 자산은 바이너리로 (줄바꿈 변환 금지 — 파일이 깨진다)
+*.task binary
+*.tflite binary
+*.jpg binary
+*.png binary
