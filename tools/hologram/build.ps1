@@ -52,8 +52,16 @@ param(
     [double]$TextureWash = 0.0,
     [double]$LineSwell = 0.0,
     [switch]$LinesFront,
+    [double]$LineAlpha = 1.0,
+    [double]$LineHalo = 0.0,
+    # 후광 색. 어두운 선에는 흰 후광, 흰 선에는 어두운 후광이다.
+    [string]$HaloColor = "FFFFFF",
+    [double]$ScanHalo = 0.0,
+    [string]$ScanHaloColor = "FFFFFF",
     [string]$Zones = "",
     [switch]$FilmAlpha,
+    # 실루엣 안쪽의 자잘한 구멍을 메운다 (머리카락 가닥 사이가 벌어진 자리).
+    [int]$CloseHoles = 0,
     [switch]$Scan,
     [string]$ScanColor = "21C7EE",
     [double]$ScanThickness = 0.02,
@@ -66,6 +74,23 @@ param(
     [switch]$Head,
     [double]$HeadDepth = 1.05,
     [int]$HeadRings = 6,
+    # 머리 전체를 두르는 옅은 격자 색. 비워 두면 렌더러 기본값을 쓴다.
+    [string]$HeadWire = "",
+    # 머리 격자를 이 면 수로 줄인 뒤에 두른다 (0 = 안 줄임).
+    [int]$HeadWireFaces = 0,
+    # 머리 격자를 표면에서 띄우는 높이 (얼굴 반지름 1 기준).
+    [double]$HeadWireLift = 0.0,
+    # 머리 격자를 복셀로 각지게 짓는다 (옥트리 깊이. 4=16칸, 5=32칸).
+    [int]$HeadWireBlocks = 0,
+    # 사진 색이 입혀진 실제 머리에는 격자를 두르지 않는다 (가발 망처럼 보인다).
+    [switch]$NoHeadWire,
+    # 실루엣으로 깎은 실제 머리 (carve.ps1 이 낸 head_fitted.ply).
+    # 주면 뒤통수를 지어내지 않고 이걸 붙인다.
+    [string]$HeadMesh = "",
+    # 머리에 입힐 텍스처 (bake_head_texture.py). 주면 정점 색 대신 이걸 쓴다.
+    [string]$HeadTexture = "",
+    [int]$HeadFaces = 1400,
+    [int]$HeadSmooth = 12,
     [double]$HighlightSpacing = 0.11,
     [int]$ContourStep = 2,
     [double]$DepthScale = 1.0,
@@ -210,9 +235,33 @@ if ($Scan) {
     $renderArgs += @("--scan", "--scan-color", $ScanColor,
                      "--scan-thickness", $ScanThickness,
                      "--scan-size", $ScanSize, "--scan-alpha", $ScanAlpha)
+    if ($ScanHalo -gt 0) {
+        $renderArgs += @("--scan-halo", $ScanHalo,
+                         "--scan-halo-color", $ScanHaloColor)
+    }
 }
 if ($Head) {
     $renderArgs += @("--head", "--head-depth", $HeadDepth, "--head-rings", $HeadRings)
+}
+if ($HeadWire) { $renderArgs += @("--head-wire", $HeadWire) }
+if ($NoHeadWire) { $renderArgs += "--no-head-wire" }
+if ($HeadWireFaces -gt 0) {
+    $renderArgs += @("--head-wire-faces", $HeadWireFaces)
+}
+if ($HeadWireLift -gt 0) {
+    $renderArgs += @("--head-wire-lift", $HeadWireLift)
+}
+if ($HeadWireBlocks -gt 0) {
+    $renderArgs += @("--head-wire-blocks", $HeadWireBlocks)
+}
+if ($HeadMesh) {
+    if (-not (Test-Path $HeadMesh)) { throw "머리 메시가 없다: $HeadMesh" }
+    $renderArgs += @("--head-mesh", (Resolve-Path $HeadMesh).Path,
+                     "--head-faces", $HeadFaces, "--head-smooth", $HeadSmooth)
+    if ($HeadTexture) {
+        if (-not (Test-Path $HeadTexture)) { throw "머리 텍스처가 없다: $HeadTexture" }
+        $renderArgs += @("--head-texture", (Resolve-Path $HeadTexture).Path)
+    }
 }
 
 Write-Host "[build] 1/3 Blender 렌더 ($Frames 장, ${Res}px)"
@@ -222,7 +271,12 @@ if ($LASTEXITCODE -ne 0) { throw "Blender 렌더 실패 (exit $LASTEXITCODE)" }
 if ($LinesFront) {
     # 선 레이어를 얼굴 위에 얹고 lines_*.png 를 지운다. 장수 검사보다 먼저
     # 해야 한다 — 안 그러면 두 배로 세어져서 걸린다.
-    Invoke-Native "python" @((Join-Path $PSScriptRoot "compose.py"), $rawDir) "^\[compose\]"
+    $composeArgs = @((Join-Path $PSScriptRoot "compose.py"), $rawDir)
+    if ($LineAlpha -lt 1.0) { $composeArgs += @("--line-alpha", $LineAlpha) }
+    if ($LineHalo -gt 0) {
+        $composeArgs += @("--line-halo", $LineHalo, "--halo-color", $HaloColor)
+    }
+    Invoke-Native "python" $composeArgs "^\[compose\]"
     if ($LASTEXITCODE -ne 0) { throw "선 겹치기 실패 (exit $LASTEXITCODE)" }
 }
 
@@ -236,6 +290,7 @@ $glowArgs = @((Join-Path $here "glow.py"), "--src", $rawDir, "--out", $glowDir,
               "--alpha-steps", $AlphaSteps)
 if ($Ink) { $glowArgs += @("--ink", $Ink) }
 if ($FilmAlpha) { $glowArgs += "--keep-color" }
+if ($CloseHoles -gt 0) { $glowArgs += @("--close-holes", $CloseHoles) }
 Invoke-Native "python" $glowArgs
 if ($LASTEXITCODE -ne 0) { throw "glow.py 실패 (exit $LASTEXITCODE)" }
 

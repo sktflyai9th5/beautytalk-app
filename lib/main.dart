@@ -27,6 +27,11 @@ Future<void> main() async {
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
+      // 화면 맨 아래 시스템 내비게이션 바까지 흰색으로 이어 준다.
+      // 두지 않으면 흰 탭바 아래에 회색 띠가 한 줄 남는다.
+      systemNavigationBarColor: Color(0xFFFFFFFF),
+      systemNavigationBarIconBrightness: Brightness.dark,
+      systemNavigationBarDividerColor: Color(0xFFFFFFFF),
     ));
     runApp(const BeautyTalkApp());
   }, (error, stack) {
@@ -124,6 +129,25 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  /// ② 인트로가 끝나면 **바로 플로우로 들어간다.**
+  ///
+  /// 예전에는 여기서 진입 화면이 한 번 더 나왔는데, 인트로와 똑같이
+  /// "두드리면 시작합니다" 를 말하면서 두드릴 곳만 하나 더 만드는 화면이었다.
+  /// 화면을 못 보는 사용자에게는 같은 안내를 두 번 듣고 두 번 두드리는 셈이다.
+  ///
+  /// **반드시 [AnimatedBuilder] 안에서 불러야 한다.** 바깥 build 에서 부르면
+  /// [AppState.start] 의 notifyListeners 를 이 위젯이 듣지 못해 배경만 뜬 채
+  /// 멈춘다 (실제로 그렇게 멈췄다).
+  Widget _enterNow(AppState s) {
+    if (!s.started) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(s.start());
+      });
+    }
+    // 한 프레임 스쳐 가는 화면이라 배경만 둔다.
+    return const EntryScreenPlaceholder();
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = _state;
@@ -145,8 +169,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
       body: AnimatedBuilder(
         animation: s,
         builder: (context, _) => switch (s.phase) {
-
-          AppPhase.entry => EntryScreen(state: s),
+          AppPhase.entry => _enterNow(s),
           AppPhase.main => MainShell(state: s),
         },
       ),

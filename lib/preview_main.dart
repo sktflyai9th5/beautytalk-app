@@ -106,7 +106,7 @@ class _PreviewHomeState extends State<_PreviewHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF120309),
+      backgroundColor: const Color(0xFF0E1712),
       body: SafeArea(
         child: Column(
           children: [
@@ -171,7 +171,7 @@ class _Idle extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFF2A0810), Color(0xFF1B0710)],
+          colors: [Color(0xFF14211A), Color(0xFF1F4C31)],
         ),
       ),
       child: Center(
@@ -193,7 +193,7 @@ class _Idle extends StatelessWidget {
               onPressed: onStart,
               style: FilledButton.styleFrom(
                 backgroundColor: _accent,
-                foregroundColor: const Color(0xFF1B0710),
+                foregroundColor: const Color(0xFF1F4C31),
                 padding:
                     const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
               ),
@@ -233,7 +233,7 @@ class _Controls extends StatelessWidget {
           label: Text(running ? '다시 재생' : '재생'),
           style: FilledButton.styleFrom(
             backgroundColor: _accent,
-            foregroundColor: const Color(0xFF1B0710),
+            foregroundColor: const Color(0xFF1F4C31),
           ),
         ),
         Row(

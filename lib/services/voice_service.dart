@@ -62,6 +62,71 @@ class VoiceService extends ChangeNotifier {
   bool get sttAvailable => _sttAvailable;
   String get partialText => _partial;
 
+  /// 받아 적어 둔 것을 비운다.
+  ///
+  /// 세션이 끝나도 [partialText] 와 후보는 남아 있어서, 다음 화면에서
+  /// **지난번에 한 말이 그대로 다시 올라온다.** 새로 들을 자리에서는
+  /// 반드시 먼저 비운다.
+  void clearHeard() {
+    if (_partial.isEmpty && _candidates.isEmpty) return;
+    _partial = '';
+    _candidates = const [];
+    notifyListeners();
+  }
+
+  /// 지금 들어오는 소리 크기 0~1. 듣고 있지 않으면 0 이다.
+  ///
+  /// 질문 화면의 파형이 이 값으로 움직인다 — **실제로 말할 때만** 움직여야
+  /// 마이크가 살아 있다는 신호가 된다. 가만히 흔들리는 파형은 장식일 뿐이고,
+  /// 소리가 안 잡히는 상황(권한·먹통)을 사용자가 알아챌 방법이 없어진다.
+  double get soundLevel => _level;
+  double _level = 0;
+
+  /// TTS 가 지금 읽고 있는 세기 0~1. 낱말이 바뀔 때 1 로 튀고, 화면 쪽에서
+  /// 시간에 따라 가라앉힌다. 말하지 않으면 0 이다.
+  double get speechPulse => isVoicing ? _speechPulse : 0;
+  double _speechPulse = 0;
+
+  /// **소리가 실제로 나오는 중인가.** [isSpeaking] 은 대기열 깃발이라 이
+  /// 기기에서 `speak()` 가 낭독이 끝나기 전에 돌아오면 소리보다 먼저
+  /// 꺼지고, 반대로 문장 사이나 엔진이 숨을 고르는 동안에는 소리가 없는데
+  /// 켜져 있다 — 둘 다 파형이 소리와 어긋나는 원인이었다.
+  ///
+  /// 그래서 낱말 신호가 한 번이라도 온 엔진에서는 **신호만 본다**: 엔진이
+  /// 낱말을 읽을 때마다 progress 가 오므로, 마지막 신호가 0.65초 안이면
+  /// 말하는 중이다. 말이 끊기면 파형도 같이 끊기고, 다시 시작하면 첫
+  /// 낱말과 함께 돌아온다. (낱말 사이 간격은 이보다 짧아서 안 깜빡인다.)
+  /// 신호를 안 주는 엔진에서만 깃발로 되돌아간다.
+  bool get isVoicing => _sawWordSignal
+      ? DateTime.now().difference(_lastWordAt) <
+          const Duration(milliseconds: 650)
+      : _speaking;
+  DateTime _lastWordAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _sawWordSignal = false;
+
+  /// 파형이 스스로 가라앉게 화면에서 부른다.
+  void decaySpeechPulse() {
+    if (_speechPulse <= 0) return;
+    _speechPulse = (_speechPulse - 0.06).clamp(0.0, 1.0);
+  }
+
+  /// 「못 들었어요」 안내를 잠시 끈다.
+  ///
+  /// 질문 화면에서는 세션이 짧은 침묵에 스스로 꺼져도 [AppState] 가 마이크를
+  /// 다시 연다. 그때마다 "못 들었어요" 를 읽으면, 말하려고 숨 고르는 사이에
+  /// 안내가 계속 끼어들어 정작 말을 못 한다.
+  bool suppressMissedPrompt = false;
+
+  /// 안드로이드가 주는 값은 대체로 -2 ~ 10 dB 언저리다. 0~1 로 눌러 담고
+  /// 조금씩만 따라가게 해서 파형이 튀지 않게 한다.
+  void _onLevel(double db) {
+    final v = ((db + 2) / 12).clamp(0.0, 1.0);
+    final next = _level + (v - _level) * 0.35;
+    if ((next - _level).abs() < 0.01) return;
+    _level = next;
+    notifyListeners();
+  }
+
   /// TTS 쪽 준비가 끝났는지. STT 초기화는 느려서 [init] 전체를 기다리면
   /// 인트로 안내(0.2초)가 **저장된 목소리가 적용되기 전에** 나가 버린다.
   /// 그래서 TTS 부분만 따로 알린다.
@@ -80,6 +145,15 @@ class VoiceService extends ChangeNotifier {
     // 앱이 자기 안내 방송("…촬영하기 버튼을…")을 받아 적어 혼자 촬영하고
     // 질문하고 분석까지 갔다. _speaking 은 대기열(_enqueue/whenComplete)만 만진다.
     _tts.setErrorHandler((m) => debugPrint('[TTS] engine error: $m'));
+    // 읽고 있는 낱말이 바뀔 때마다 알려 준다. 이 신호로 파형을 튀게 한다 —
+    // TTS 출력의 실제 음량은 받아올 수 없지만, **낱말 경계는 말의 박자**라
+    // 그것만으로도 "지금 이 말을 하고 있다" 가 보인다.
+    _tts.setProgressHandler((text, start, end, word) {
+      _speechPulse = 1.0;
+      _lastWordAt = DateTime.now();
+      _sawWordSignal = true;
+      notifyListeners();
+    });
 
     await _loadVoices();
     await _applyPreferredVoice();
@@ -87,13 +161,15 @@ class VoiceService extends ChangeNotifier {
     if (!_ttsReady.isCompleted) _ttsReady.complete();
 
     // STT
-    // AiAi(Android System Intelligence) 엔진 사용 시도 → 실패하면 기본 엔진으로 폴백.
-    // androidIntentLookup 은 RecognitionService 목록의 첫 번째를 고르는데,
-    // 이 기기에서는 com.google.android.as (AiAi) 가 첫 번째다.
-    _sttAvailable = await _initStt(aiAi: true);
+    // **기본 엔진을 먼저 쓴다.** androidIntentLookup 은 이 기기에서
+    // com.google.android.as (AiAi) 를 고르는데, 그건 "볼륨 올려" 같은 짧은
+    // 명령을 알아듣는 인식기라 **한 마디만 듣고 스스로 끊는다.** 질문을
+    // 말하려고 숨 고르는 사이에 이미 세션이 끝나 있었다.
+    // 기본 엔진이 없을 때만 AiAi 로 되돌아간다.
+    _sttAvailable = await _initStt(aiAi: false);
     if (!_sttAvailable) {
-      debugPrint('[STT] AiAi 초기화 실패 → 기본 엔진으로 폴백');
-      _sttAvailable = await _initStt(aiAi: false);
+      debugPrint('[STT] 기본 엔진 초기화 실패 → AiAi 로 폴백');
+      _sttAvailable = await _initStt(aiAi: true);
     }
 
     if (_sttAvailable) {
@@ -115,6 +191,7 @@ class VoiceService extends ChangeNotifier {
           // 아무것도 못 들은 채 꺼졌으면 말해 준다. 조용히 꺼지면 사용자는
           // 죽은 마이크에 대고 계속 말한다 — 실제로 그랬다.
           if (_partial.isEmpty &&
+              !suppressMissedPrompt &&
               (e.errorMsg == 'error_no_match' ||
                   e.errorMsg == 'error_speech_timeout')) {
             unawaited(speak(missedSentence));
@@ -322,7 +399,7 @@ class VoiceService extends ChangeNotifier {
       if (scope != _scope) return; // 화면이 바뀌었다 — 이 말은 버린다
       await _play(text);
     }).whenComplete(() {
-      _queued--;
+      if (_queued > 0) _queued--; // stopSpeaking 이 이미 비웠을 수 있다
       if (_queued == 0) {
         _speaking = false;
         notifyListeners();
@@ -359,6 +436,9 @@ class VoiceService extends ChangeNotifier {
     _chain = Future<void>.value();
     await _tts.stop();
     _speaking = false;
+    // 엔진이 완료를 안 알려 준 말이 큐에 남으면 다음 듣기가 막힌다.
+    // 여기서 끊었으니 큐도 같이 비운다.
+    _queued = 0;
     notifyListeners();
   }
 
@@ -372,20 +452,33 @@ class VoiceService extends ChangeNotifier {
     if (_speaking || _queued > 0) {
       await stopSpeaking(); // 읽는 중이거나 읽을 게 남았으면 끊고 바로 듣기
     }
-    if (!_sttAvailable || _muted || _stt.isListening) return;
+    if (!_sttAvailable || _muted || _stt.isListening) {
+      // 조용히 돌아가면 "눌러도 아무 일이 없다" 로만 보인다. 어디서 막혔는지
+      // 남겨야 다음에 같은 신고가 왔을 때 추측하지 않아도 된다.
+      debugPrint('[STT] 시작 못 함 — 사용가능=$_sttAvailable 음소거=$_muted '
+          '이미듣는중=${_stt.isListening}');
+      return;
+    }
     _wantListening = true;
     notifyListeners();
     // 이전 세션이 완전히 정리되도록 아주 짧게 양보 (error_busy 방지)
     await Future<void>.delayed(const Duration(milliseconds: 120));
-    if (!_wantListening || _speaking || _muted || _stt.isListening) return;
+    if (!_wantListening || _speaking || _muted || _stt.isListening) {
+      debugPrint('[STT] 대기 후 취소 — 원함=$_wantListening 말하는중=$_speaking '
+          '음소거=$_muted 이미듣는중=${_stt.isListening}');
+      return;
+    }
     try {
       await _stt.listen(
         onResult: _onResult,
+        onSoundLevelChange: _onLevel,
         listenOptions: SpeechListenOptions(
           localeId: _localeId,
-          listenFor: const Duration(seconds: 30),
-          // 2초면 "말씀하세요" 를 듣고 숨 고르는 사이에 꺼진다. 실제로 그랬다.
-          pauseFor: const Duration(seconds: 4),
+          listenFor: const Duration(seconds: 40),
+          // 말이 멎은 뒤 세션을 닫기까지. 짧게 잡아야 최종 결과가 빨리 온다 —
+          // 길면 다 말하고도 몇 초를 기다리게 된다. 말을 시작하기 전의
+          // 뜸은 listenFor 가 받아 준다.
+          pauseFor: const Duration(seconds: 3),
           partialResults: true,
           cancelOnError: true,
           listenMode: ListenMode.dictation,
@@ -401,6 +494,7 @@ class VoiceService extends ChangeNotifier {
 
   Future<void> stopListening() async {
     _wantListening = false;
+    _level = 0; // 파형이 마지막 크기로 굳어 있으면 아직 듣는 줄로 보인다
     if (_stt.isListening) await _stt.stop();
     notifyListeners();
   }
@@ -408,10 +502,22 @@ class VoiceService extends ChangeNotifier {
   /// 세션 종료 — 다시 들으려면 화면을 두드려야 한다.
   void _stopSession() {
     _wantListening = false;
+    _level = 0;
     notifyListeners();
   }
 
+  /// 세션이 열린 시각. 얼마나 버티는지 로그로 재려고 둔다.
+  DateTime? _listenStart;
+
   void _onStatus(String status) {
+    if (status == 'listening') {
+      _listenStart = DateTime.now();
+      debugPrint('[STT] 듣기 시작');
+    } else if (_listenStart != null) {
+      final ms = DateTime.now().difference(_listenStart!).inMilliseconds;
+      debugPrint('[STT] $status — ${ms}ms 열려 있었다');
+      if (status == 'done' || status == 'notListening') _listenStart = null;
+    }
     debugPrint('[STT] status=$status');
     if (status == 'done' || status == 'notListening') _stopSession();
     notifyListeners();

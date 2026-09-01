@@ -19,7 +19,11 @@ class SettingsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        const ScreenHeader(title: '설정'),
+        // 설정은 하단 탭에서 빠졌다 — 돌아갈 길은 이 뒤로 가기뿐이다.
+        ScreenHeader(
+          title: '설정',
+          onBack: () => state.goTab(AppTab.cosmetic),
+        ),
         const SizedBox(height: 14),
         Expanded(
           child: SingleChildScrollView(

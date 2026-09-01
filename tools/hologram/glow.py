@@ -35,6 +35,12 @@ parser.add_argument("--alpha-steps", type=int, default=32,
                     help="알파를 몇 단계로 양자화할지. 0 이면 안 한다")
 parser.add_argument("--ink", default=None,
                     help="밝은 배경용. 흰 바탕에 렌더한 선을 이 색(hex) 잉크로 뽑는다")
+parser.add_argument("--close-holes", type=int, default=0,
+                    help="**실루엣 안쪽의 자잘한 구멍을 메운다** (이 반경까지). "
+                         "머리카락 가닥 사이가 벌어진 자리가 밝은 카드 위에서는 "
+                         "뚫린 것처럼 보인다. 알파를 닫고(팽창 후 수축) 그 자리의 "
+                         "색은 이웃에서 끌어온다. 실루엣 바깥 테두리는 건드리지 "
+                         "않는다 — 머리 모양이 부풀면 안 된다")
 parser.add_argument("--keep-color", action="store_true",
                     help="이미 알파가 있는 렌더를 색 그대로 통과시킨다 (사진 텍스처용)")
 args = parser.parse_args()
@@ -86,6 +92,55 @@ def blur_f32(arr, sigma):
     return out
 
 
+def close_holes(rgb, alpha, radius):
+    """실루엣 안쪽의 구멍만 메운다.
+
+    가로·세로 양쪽에서 '맨 처음 채워진 화소와 맨 끝 사이'를 안쪽으로 본다.
+    둘 다 안쪽인데 비어 있으면 구멍이다 — 실루엣 바깥은 이 판정에 안 걸리므로
+    머리 모양이 부푸는 일이 없다. 메운 자리의 색은 이웃에서 번지게 한다.
+    """
+    solid = alpha > 0.16
+    if not solid.any():
+        return rgb, alpha
+    inside_h = np.zeros_like(solid)
+    for y in range(solid.shape[0]):
+        xs = np.flatnonzero(solid[y])
+        if len(xs) > 1:
+            inside_h[y, xs[0]:xs[-1] + 1] = True
+    inside_v = np.zeros_like(solid)
+    for x in range(solid.shape[1]):
+        ys = np.flatnonzero(solid[:, x])
+        if len(ys) > 1:
+            inside_v[ys[0]:ys[-1] + 1, x] = True
+    holes = inside_h & inside_v & ~solid
+    if not holes.any():
+        return rgb, alpha
+
+    filled_rgb, filled_a = rgb.copy(), alpha.copy()
+    known = solid.copy()
+    todo = holes.copy()
+    for _ in range(max(radius, 1)):
+        if not todo.any():
+            break
+        acc = np.zeros_like(filled_rgb)
+        acc_a = np.zeros_like(filled_a)
+        count = np.zeros_like(filled_a)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1),
+                       (1, 1), (1, -1), (-1, 1), (-1, -1)):
+            k = np.roll(known, (dy, dx), axis=(0, 1))
+            acc += np.roll(filled_rgb, (dy, dx), axis=(0, 1)) * k[:, :, None]
+            acc_a += np.roll(filled_a, (dy, dx), axis=(0, 1)) * k
+            count += k
+        grow = todo & (count > 0)
+        if not grow.any():
+            break
+        filled_rgb[grow] = acc[grow] / count[grow, None]
+        filled_a[grow] = np.maximum(acc_a[grow] / count[grow], 0.85)
+        known |= grow
+        todo &= ~grow
+    return filled_rgb, filled_a
+
+
 def process_keep_color(path_in, path_out):
     """투명 배경으로 렌더된 그림을 색 그대로 통과시킨다.
 
@@ -95,7 +150,10 @@ def process_keep_color(path_in, path_out):
     값의 가짓수가 그대로 파일 크기가 된다.
     """
     rgba = np.asarray(Image.open(path_in).convert("RGBA"), dtype=np.float32) / 255.0
-    alpha = rgba[:, :, 3]
+    rgb, alpha = rgba[:, :, :3].copy(), rgba[:, :, 3].copy()
+    if args.close_holes > 0:
+        rgb, alpha = close_holes(rgb, alpha, args.close_holes)
+    rgba = np.concatenate([rgb, alpha[:, :, None]], axis=2)
     alpha = np.where(alpha < args.alpha_floor, 0.0, alpha)
     if args.alpha_steps > 0:
         alpha = np.round(alpha * args.alpha_steps) / args.alpha_steps

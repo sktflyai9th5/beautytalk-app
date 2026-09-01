@@ -17,9 +17,20 @@ import 'package:beauty_talk/widgets/analyzing_preview.dart';
 /// 진행률과 상태 문장은 preview_main.dart 의 대본과 같은 값을 흉내 낸다.
 void main() {
   const fps = 24;
-  // 연출이 5.6초라 그보다 길게 잡아야 마지막 부위까지 담기고,
-  // 연출이 끝난 뒤에도 화면이 버티는지까지 보인다.
+  // 연출이 5.6초라 그보다 길게 잡아야 마지막 부위까지 담긴다.
   const seconds = 8;
+
+  // 그 뒤로 결과 화면을 이어 붙인다. 분석만 담으면 연출이 어디로 이어지는지가
+  // 안 보인다 — 실제로 "결과 부분이 안 나온다" 는 얘기를 들었다.
+  const resultSeconds = 4;
+
+  // 실제 앱에서는 서버가 준 값이 들어온다. 여기 문장은 화면 구성을 보여 주기
+  // 위한 예시다.
+  const findings = <(String, String, String)>[
+    ('왼쪽 볼', '베이스가 고르지 않게 발려 있어요.', '퍼프로 가볍게 두드려 정리해 주세요.'),
+    ('입술', '입술 경계가 조금 번져 있어요.', '면봉으로 바깥선을 정리해 주세요.'),
+    ('이마', '피지로 살짝 무너졌어요.', '기름종이로 누른 뒤 파우더를 얹어 주세요.'),
+  ];
   const total = fps * seconds;
 
   // 앱이 실제로 띄우는 문장. 진행에 따라 바뀌지 않고, **끝났다고 말하지
@@ -85,8 +96,43 @@ void main() {
       });
     }
 
+    // 이어서 결과 화면. 중간에 한 항목을 골라서 "누르면 그 자리만 밝아진다" 는
+    // 것까지 보여 준다.
+    Widget resultFrame() => MaterialApp(
+          debugShowCheckedModeBanner: false,
+          home: Scaffold(
+            body: RepaintBoundary(
+              key: key,
+              child: ResultPreview(findings: findings),
+            ),
+          ),
+        );
+
+    const resultTotal = fps * resultSeconds;
+    await tester.pumpWidget(resultFrame());
+    // 아바타 프레임과 부위 좌표가 실릴 시간을 준다.
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+    });
+    await tester.pump();
+
+    // 결과는 한 가지만 보여 준다 — 넘길 것이 없다.
+    for (var i = 0; i < resultTotal; i++) {
+      await tester.pump(step);
+
+      await tester.runAsync(() async {
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final image = await boundary.toImage(pixelRatio: 1.0);
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        File('${dir.path}/f_${(total + i).toString().padLeft(4, '0')}.png')
+            .writeAsBytesSync(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    }
+
     // ignore: avoid_print
-    print('[film] $total 장 -> ${dir.path}');
+    print('[film] ${total + resultTotal} 장 -> ${dir.path}');
 
     // 움직이는 WebP 가 타이머를 물고 있으면 테스트가 안 끝난다.
     await tester.pumpWidget(const SizedBox.shrink());

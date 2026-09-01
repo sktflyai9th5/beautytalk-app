@@ -16,6 +16,7 @@ numpy 를 끌어내려서 onnx2tf / TensorFlow 쪽이 통째로 깨진다.
 
 import argparse
 import json
+import math
 import os
 
 import numpy as np
@@ -48,6 +49,24 @@ parser.add_argument("--highlight-spacing", type=float, default=0.11,
                     help="하이라이트 사이 최소 간격 (얼굴 너비 대비). 클수록 적다")
 parser.add_argument("--contour-step", type=int, default=2,
                     help="윤곽선을 몇 점마다 하나씩 남길지. 1 이면 원본 그대로")
+parser.add_argument("--max-yaw", type=float, default=10.0,
+                    help="좌우로 이만큼(도) 넘게 돌아간 컷은 버린다. 돌려 세우면 "
+                         "정면이 되긴 하지만 그만큼 사진이 늘어난다")
+parser.add_argument("--pitch-range", type=float, nargs=2, default=(-18.0, 8.0),
+                    metavar=("MIN", "MAX"),
+                    help="허용할 위아래 각도(도). **고개와 시선을 합친 값**이다. "
+                         "+가 위를 보는 것. 위를 보는 컷은 콧구멍이 보여서 좁게 잡는다")
+parser.add_argument("--max-pitch-fix", type=float, default=12.0,
+                    help="숙이거나 젖힌 고개를 이 각도까지 세워 준다. 사진은 "
+                         "같이 돌지 않으므로 많이 돌리면 형태와 사진이 어긋난다")
+parser.add_argument("--edge-margin", type=float, default=0.04,
+                    help="얼굴이 화면 가장자리에서 이만큼(화면 대비) 안쪽에 "
+                         "다 들어와야 한다. 턱이 잘린 컷을 거른다")
+parser.add_argument("--max-blink", type=float, default=0.5,
+                    help="눈 깜빡임 점수가 이보다 크면 그 컷은 버린다 (0~1)")
+parser.add_argument("--no-align", action="store_true",
+                    help="고른 컷의 고개 각도를 그대로 둔다. 기본은 얼굴을 "
+                         "정면으로 돌려 세워서 스윕이 정면을 한가운데로 삼게 한다")
 args = parser.parse_args()
 
 
@@ -89,16 +108,40 @@ def score_frame(landmarks, width, height, gray):
     y0, y1 = int(max(ys.min(), 0)), int(min(ys.max(), height))
     sharpness = laplacian_variance(gray[y0:y1, x0:x1]) if (x1 > x0 + 3 and y1 > y0 + 3) else 0.0
 
+    # 화면 밖으로 잘린 얼굴은 버린다. 턱이 잘린 컷으로 격자를 뜨면 사진도
+    # 그만큼 없어서 아바타 턱이 통째로 비고, 크기 점수는 오히려 높게 나온다.
+    margin_x = args.edge_margin * width
+    margin_y = args.edge_margin * height
+    cropped = (xs.min() < margin_x or xs.max() > width - margin_x
+               or ys.min() < margin_y or ys.max() > height - margin_y)
+
     size = (face_w * face_h) / (width * height)
     # 정면도를 세제곱해 크게 반영한다. 비스듬히 잡힌 격자는 깊이가 엉망이다.
     return {
         "score": size * (frontality ** 3) * np.log1p(sharpness) * 1000.0,
         "size": size,
         "frontality": frontality,
+        "cropped": bool(cropped),
         "sharpness": sharpness,
         "width": width,
         "height": height,
     }
+
+
+def head_pose(matrix):
+    """mediapipe 의 얼굴 자세 행렬에서 (좌우, 위아래) 각도를 도로 뽑는다.
+
+    **위아래는 이 행렬로만 제대로 잡힌다.** 랜드마크로 얼굴 평면의 법선을
+    구해 재 봤더니, 아래에서 올려 찍어 콧구멍이 다 보이는 컷을 12도로 재서
+    통과시켰다. mediapipe 의 z 는 카메라 기준 깊이가 아니라 모델 기준이라
+    그렇다. 자세 행렬은 카메라 좌표계의 회전이라 그대로 믿을 수 있다.
+
+    부호: **+ 가 위를 보는 것**이다.
+    """
+    R = np.array(matrix, dtype=np.float64).reshape(4, 4)[:3, :3]
+    pitch = math.degrees(math.atan2(-R[2, 1], R[2, 2]))
+    yaw = math.degrees(math.asin(max(-1.0, min(1.0, R[2, 0]))))
+    return yaw, pitch
 
 
 def thin_points(pts, spacing):
@@ -272,12 +315,82 @@ def pick_highlights(xy, contour_pairs, spacing):
     return kept
 
 
-def to_blender_coords(landmarks, width, height, depth_scale):
+def rotate(verts, axis, angle):
+    """축(단위 벡터) 둘레로 angle(라디안)만큼 돌린다 (로드리게스)."""
+    if abs(angle) < 1e-9:
+        return verts
+    k = axis / np.linalg.norm(axis)
+    return (verts * math.cos(angle)
+            + np.cross(k, verts) * math.sin(angle)
+            + np.outer(verts @ k, k) * (1.0 - math.cos(angle)))
+
+
+def align_frontal(verts, pitch=0.0, max_pitch_fix=0.0):
+    """격자를 돌려 세운다 — 좌우는 끝까지, 위아래는 **한도까지만**.
+
+    한 바퀴 도는 촬영에서 완전한 정면 컷이 잡히는 일은 드물다. 20도쯤
+    돌아간 컷을 그대로 쓰면 스윕이 그 각도를 **한가운데로 삼아** 좌우로
+    흔들려서, 정면이 아니라 오른뺨을 기준으로 도는 것처럼 보인다.
+
+    **위아래는 조금만 세운다.** 사진은 정점에 붙어 있어서 돌려도 같이 돌지
+    않는다. 위를 보고 찍힌 컷을 격자만 정면으로 세우면 형태는 정면인데 사진은
+    콧구멍이 보이는 채로 남아 둘이 어긋난다 — 그렇게 구웠다가 "위를 올려보는
+    얼굴" 이 됐다. 그렇다고 아예 안 세우면 이번엔 고개 숙인 컷이 그대로 남아
+    "아래를 보는 얼굴" 이 된다. 그래서 `--max-pitch-fix`(12도)까지만 세운다 —
+    이 정도는 사진과 형태가 서로 버티지 않는다. 나머지는 컷을 고를 때 잡는다
+    (`--pitch-range`, 시선까지 본다).
+
+    세 번 돌린다. 얼굴 법선의 **수평 성분**을 카메라 쪽(-Y)에 맞추고(Z축),
+    시선 축(Y축) 둘레로 굴려 턱-이마 축을 세우고, 마지막에 X축으로 고개를
+    든다. 회전만 쓴다 — 거울상이 되면 가르마와 점 위치가 좌우로 바뀐다.
+
+    (돌린 정점, 바로잡은 좌우 각도, 세운 고개 각도) 를 돌려준다.
+    """
+    right = verts[CHEEK_RIGHT] - verts[CHEEK_LEFT]
+    up = verts[FOREHEAD] - verts[CHIN]
+    # Blender 축에서 X × Z = -Y 다. 얼굴이 카메라(-Y)를 보므로 이 방향이 정면.
+    front = np.cross(right, up)
+    flat = np.array([front[0], front[1], 0.0])
+    norm = np.linalg.norm(flat)
+    if norm < 1e-9:
+        return verts, 0.0, 0.0
+    flat = flat / norm
+
+    # 수평면 안에서만 돌린다 = Z축 회전. 부호는 외적의 z 성분이 준다.
+    target = np.array([0.0, -1.0, 0.0])
+    sin = float(np.cross(flat, target)[2])
+    cos = float(np.dot(flat, target))
+    yaw = math.atan2(sin, cos)
+    verts = rotate(verts, np.array([0.0, 0.0, 1.0]), yaw)
+
+    # 시선 축 둘레로 굴려 세운다. 카메라에서 보는 그림은 그대로고 기울기만 선다.
+    up = verts[FOREHEAD] - verts[CHIN]
+    roll = math.atan2(float(up[0]), float(up[2]))
+    verts = rotate(verts, np.array([0.0, 1.0, 0.0]), -roll)
+
+    # 고개를 한도까지 세운다. X축(화면 가로) 둘레 회전이다.
+    #
+    # 부호에 주의: 이 좌표계에서 **+X 둘레 양의 회전은 고개를 숙인다**
+    # (얼굴이 보는 -Y 가 -Z 쪽으로 간다). pitch 는 + 가 위를 보는 것이니
+    # 숙인 고개(-)를 들려면 음의 회전이 필요하다 — 즉 pitch 를 그대로 쓴다.
+    # 반대로 넣었다가 고개가 더 숙여져서 두개골 윗면만 보였다.
+    fix = 0.0
+    if max_pitch_fix > 0 and pitch:
+        fix = max(-max_pitch_fix, min(max_pitch_fix, pitch))
+        verts = rotate(verts, np.array([1.0, 0.0, 0.0]), math.radians(fix))
+    return verts, math.degrees(abs(yaw)), fix
+
+
+def to_blender_coords(landmarks, width, height, depth_scale, align=True,
+                      pitch=0.0, max_pitch_fix=0.0):
     """mediapipe 좌표를 Blender 축으로 옮긴다.
 
     mediapipe: x 오른쪽, y 아래, z 카메라 쪽이 음수. x·y 는 이미지 크기로
     나뉘어 있어 그대로 쓰면 화면 비율만큼 찌그러진다. 픽셀로 되돌려야 한다.
     z 는 x 와 같은 스케일이라 width 를 곱한다.
+
+    돌려 세우는 것은 **크기를 맞추기 전에** 한다 — 뒤에 하면 정규화가
+    잡아 둔 상자에서 얼굴이 삐져나온다.
     """
     xs = np.array([p.x for p in landmarks]) * width
     ys = np.array([p.y for p in landmarks]) * height
@@ -286,8 +399,11 @@ def to_blender_coords(landmarks, width, height, depth_scale):
     # Blender: x 오른쪽, y 화면 안쪽, z 위
     verts = np.stack([xs, zs, -ys], axis=1)
     verts -= verts.mean(axis=0)
+    tilt = fix = 0.0
+    if align:
+        verts, tilt, fix = align_frontal(verts, pitch, max_pitch_fix)
     verts /= np.abs(verts).max()
-    return verts
+    return verts, tilt, fix
 
 
 def main():
@@ -295,6 +411,12 @@ def main():
         base_options=BaseOptions(model_asset_path=args.model),
         running_mode=vision.RunningMode.IMAGE,
         num_faces=1,
+        # 눈을 떴는지 보려고 켠다 (eyeBlinkLeft/Right).
+        output_face_blendshapes=True,
+        # 고개 각도는 **이 행렬**로 잰다. 랜드마크로 얼굴 평면의 법선을 구하는
+        # 방식은 좌우는 맞는데 위아래를 못 잡는다 — 아래에서 올려 찍어 콧구멍이
+        # 보이는 컷을 12도로 재서 통과시켰다.
+        output_facial_transformation_matrixes=True,
     )
 
     names = sorted(
@@ -305,6 +427,7 @@ def main():
         raise SystemExit(f"프레임이 없다: {args.frames}")
 
     results = []
+    blinked = 0
     with vision.FaceLandmarker.create_from_options(options) as landmarker:
         for name in names:
             path = os.path.join(args.frames, name)
@@ -321,10 +444,43 @@ def main():
             scored = score_frame(landmarks, rgb.shape[1], rgb.shape[0], gray)
             if scored is None:
                 continue
+
+            # 눈을 감은 컷은 버린다. 점수만으로는 못 거른다 — 감은 눈이 크기·
+            # 정면도·선명도를 하나도 깎지 않아서, 한 바퀴 도는 동안 하필
+            # 깜빡인 순간이 1등으로 뽑히는 일이 실제로 있었다.
+            blink = 0.0
+            look_up = look_down = 0.0
+            if detection.face_blendshapes:
+                for category in detection.face_blendshapes[0]:
+                    name_ = category.category_name
+                    if name_ in ("eyeBlinkLeft", "eyeBlinkRight"):
+                        blink = max(blink, float(category.score))
+                    elif name_ in ("eyeLookUpLeft", "eyeLookUpRight"):
+                        look_up = max(look_up, float(category.score))
+                    elif name_ in ("eyeLookDownLeft", "eyeLookDownRight"):
+                        look_down = max(look_down, float(category.score))
+            scored["blink"] = blink
+            if blink > args.max_blink:
+                blinked += 1
+                continue
+
+            if detection.facial_transformation_matrixes:
+                yaw, pitch = head_pose(detection.facial_transformation_matrixes[0])
+            else:
+                yaw = pitch = 0.0
+            scored["yaw"] = yaw
+            scored["pitch"] = pitch
+            # **고개만 봐서는 안 된다.** 고개를 숙인 채 눈만 들어 카메라를 보는
+            # 컷이 화면에서는 가장 정면으로 읽힌다. 눈이 향한 쪽을 각도로 바꿔
+            # 더한다 (블렌드셰이프 0~1 을 대략 25도 폭으로 본다).
+            scored["gaze"] = pitch + 25.0 * (look_up - look_down)
+
             scored["name"] = name
             scored["landmarks"] = landmarks
             results.append(scored)
 
+    if blinked:
+        print(f"[face] 눈 감은 컷 {blinked}장 제외 (기준 {args.max_blink})")
     if not results:
         raise SystemExit("어느 프레임에서도 얼굴을 못 찾았다")
 
@@ -332,11 +488,40 @@ def main():
     print(f"[face] {len(results)}/{len(names)} 장에서 얼굴 검출")
     for r in results[:args.top]:
         print(f"[face]   {r['name']}  점수 {r['score']:.4f}  "
-              f"크기 {r['size']:.3f}  정면도 {r['frontality']:.3f}  선명도 {r['sharpness']:.5f}")
+              f"크기 {r['size']:.3f}  좌우 {r['yaw']:+.0f}도  "
+              f"고개 {r['pitch']:+.0f}도  시선포함 {r['gaze']:+.0f}도  "
+              f"선명도 {r['sharpness']:.5f}  눈감음 {r['blink']:.2f}")
 
-    best = results[0]
-    verts = to_blender_coords(best["landmarks"], best["width"], best["height"],
-                              args.depth_scale)
+    # 고개 각도로 먼저 거르고, 남은 것 중에서 점수로 고른다. 점수는 선명도가
+    # 거의 선형으로 들어가서, 카톡 압축으로 다들 물러진 촬영본에서는 **조금 더
+    # 또렷한 비스듬한 컷**이 정면 컷을 이긴다.
+    low, high = args.pitch_range
+    whole = [r for r in results if not r["cropped"]]
+    if len(whole) >= 3:
+        cut = len(results) - len(whole)
+        if cut:
+            print(f"[face] 화면에 잘린 컷 {cut}장 제외")
+        results = whole
+    upright = [r for r in results if low <= r["gaze"] <= high]
+    front = [r for r in upright if abs(r["yaw"]) <= args.max_yaw]
+    if front:
+        best = front[0]
+        if best is not results[0]:
+            print(f"[face] 좌우 {args.max_yaw:.0f}도 / 위아래 {low:.0f}~{high:.0f}도 "
+                  f"안에서 골랐다 ({results[0]['name']} -> {best['name']})")
+    elif upright:
+        # 좌우로 돌아간 건 돌려 세우면 되지만, 위를 보는 컷은 사진이 그대로라
+        # 못 고친다. 물러설 때도 **위아래만은** 지킨다.
+        best = upright[0]
+        print(f"[face] 좌우 {args.max_yaw:.0f}도 안쪽 컷이 없다 — "
+              f"위아래 조건만 지켜 고른다 ({best['name']})")
+    else:
+        best = results[0]
+        print("[face] 고개 각도 조건을 만족하는 컷이 없다 — 전체 1등을 쓴다")
+    verts, tilt, fix = to_blender_coords(
+        best["landmarks"], best["width"], best["height"], args.depth_scale,
+        align=not args.no_align, pitch=best["pitch"],
+        max_pitch_fix=args.max_pitch_fix)
 
     # 화면 위 좌표(0~1). 스캔 연출에서 특징점을 사진 위 제자리에 찍으려면
     # 3D 가 아니라 이 값이 필요하다.
@@ -348,7 +533,7 @@ def main():
     xy = (xy - xy.min(axis=0)) / max((xy.max(axis=0) - xy.min(axis=0)).max(), 1e-6)
     # 선과 표면을 따로 만든다. 선을 줄이려고 표면까지 성글게 하면 삼각형이
     # 얼굴을 못 덮어서 아바타에 구멍이 뚫린다 — 사진이 뜯겨 나간 것처럼 보인다.
-    edges, _ = sparse_mesh(xy, args.mesh_spacing)
+    edges, line_faces = sparse_mesh(xy, args.mesh_spacing)
     connections = vision.FaceLandmarksConnections
     faces = tesselation_faces(
         [(c.start, c.end) for c in connections.FACE_LANDMARKS_TESSELATION])
@@ -369,6 +554,9 @@ def main():
         "source_size": [best["width"], best["height"]],
         "vertices": verts.tolist(),
         "edges": [list(e) for e in edges],
+        # 성근 격자의 삼각형. 결과 화면에서 부위를 **삼각형 모양 그대로**
+        # 밝히려고 쓴다 — 동그란 빛보다 "이 격자가 그 부위다" 로 읽힌다.
+        "line_faces": line_faces,
         "faces": faces,
         "contours": [list(e) for e in contours],
         # 하이라이트로 찍을 정점. **2D 오버레이와 3D 아바타가 같은 목록을 쓴다** —
@@ -380,6 +568,9 @@ def main():
         json.dump(payload, fp)
 
     print(f"[face] 채택: {best['name']}")
+    if not args.no_align:
+        print(f"[face] 좌우 {tilt:.1f}도 / 고개 {fix:+.1f}도를 세웠다 "
+              f"(찍힌 고개 {best['pitch']:+.0f}도, 시선포함 {best['gaze']:+.0f}도)")
     print(f"[face] 정점 {len(verts)}개 / 격자 {len(edges)}선 {len(faces)}면 "
           f"/ 윤곽 {len(contours)}선 -> {args.out}")
 

@@ -69,6 +69,7 @@ class AnalysisItem {
     required this.action,
     required this.type,
     this.box,
+    this.zone,
   });
 
   final String region; // 왼쪽 볼 아래
@@ -78,6 +79,12 @@ class AnalysisItem {
 
   /// 문제 위치 — 찍은 사진 기준 0..1 (서버가 정규화해서 준다). 없을 수 있다.
   final Rect? box;
+
+  /// 3D 아바타에서 불을 켤 자리. **서버가 정해서 보낸다** — 서버는 bbox 와
+  /// 랜드마크를 갖고 있어서 좌우를 실제로 알지만, 앱은 [region] 의 글자만
+  /// 보고 짐작해야 한다. 옛 서버는 이 값을 안 보내므로 없을 수 있고,
+  /// 그때는 앱이 예전처럼 이름으로 찾는다.
+  final String? zone;
 
   static AnalysisItem? tryParse(Object? o) {
     if (o is! Map) return null;
@@ -95,6 +102,7 @@ class AnalysisItem {
       action: (o['action'] ?? '').toString(),
       type: (o['type'] ?? '').toString(),
       box: box,
+      zone: switch (o['zone']) { final String z when z.isNotEmpty => z, _ => null },
     );
   }
 }

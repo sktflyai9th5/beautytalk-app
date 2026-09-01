@@ -9,6 +9,7 @@ import 'services/backend_service.dart';
 import 'services/camera_service.dart';
 import 'services/command_matcher.dart';
 import 'services/log_service.dart';
+import 'services/scan_sfx.dart';
 import 'services/voice_service.dart';
 
 enum AppTab { cosmetic, makeup, settings }
@@ -108,9 +109,21 @@ class AppState extends ChangeNotifier {
   Timer? _makeupDebounce;
   String _makeupPending = '';
 
+  /// 새로 들을 자리에서 지난 발화를 지운다 — 화면·대기값·중복 방지값까지.
+  void _clearHeard() {
+    voice.clearHeard();
+    lastHeard = '';
+    _makeupPending = '';
+    _lastPartialFired = '';
+    _makeupDebounce?.cancel();
+  }
+
   /// 최종 인식(침묵 4초 대기)을 기다리지 않고, 부분 인식에 명령어가 보이면 즉시 실행.
   /// 같은 발화의 최종 결과가 뒤따라 와도 중복 실행되지 않게 잠시 무시한다.
   void _onVoicePartial() {
+    // 세션이 꺼졌으면 다시 열지 판단한다. 부분 인식이 없어도 불려야 하므로
+    // 아래 조기 반환보다 먼저 둔다.
+    _maybeReopenMic();
     // 말하는 중에 들어온 부분 인식은 전부 버린다 — 자기 안내 방송이다
     if (voice.isSpeaking) return;
     final p = voice.partialText.replaceAll(' ', '');
@@ -159,7 +172,16 @@ class AppState extends ChangeNotifier {
     if (tab == AppTab.makeup && !asking && !allowNav) {
       _makeupPending = voice.partialText.trim();
       _makeupDebounce?.cancel();
-      _makeupDebounce = Timer(const Duration(milliseconds: 1200), () {
+      // **이 타이머는 주 경로가 아니라 안전망이다.**
+      //
+      // 문장이 끝난 시점은 인식기가 직접 판단해 최종 결과로 알려 준다
+      // (handleVoice → ask). 사람이 말을 마치는 순간을 우리 시계로 재는 것보다
+      // 정확하다 — 말이 빠른 사람도, 중간에 뜸을 들이는 사람도 같이 맞는다.
+      //
+      // 다만 세션이 중간에 끊겨 최종 결과가 영영 안 오는 기기가 있어서,
+      // 그때만 늦게라도 보내라고 이 타이머를 남겨 둔다. 그래서 인식기가
+      // 판단할 시간을 먼저 주도록 넉넉히 잡는다.
+      _makeupDebounce = Timer(const Duration(milliseconds: 900), () {
         final q = _makeupPending;
         if (q.length < 2 || asking || tab != AppTab.makeup) return;
         // 질문형/트리거가 아닌 발화(주변 대화 등)는 무시 —
@@ -171,6 +193,10 @@ class AppState extends ChangeNotifier {
           return;
         }
         _firePartial(p);
+        _closeMicWindow();
+        // 보냈으면 마이크를 닫는다. 열어 두면 서버를 기다리는 동안 주변
+        // 소리를 계속 받아 적고, 사용자에게는 아직 듣는 중으로 보인다.
+        unawaited(voice.stopListening());
         ask(q);
       });
       return;
@@ -205,6 +231,48 @@ class AppState extends ChangeNotifier {
     super.dispose();
   }
 
+  // ------------------------------------------------------------ countdown
+  /// 촬영까지 남은 초. 3·2·1 을 세는 동안만 값이 있고 평소에는 null 이다.
+  int? countdown;
+
+  /// 세는 중에 화면을 벗어나면 취소한다. 세대가 어긋나면 그 카운트는 버린다.
+  int _countGen = 0;
+
+  /// 찍기 직전 3·2·1.
+  ///
+  /// 「접근성 명세」: 숫자만 읽는다. 화면을 못 보는 사용자에게 이 셋은
+  /// **자세를 잡을 시간**이고, 그동안 다른 말을 얹으면 셋을 놓친다.
+  /// 모션 축소 설정이면 숫자는 애니메이션 없이 뜨지만 음성 카운트는 유지한다 —
+  /// 세는 소리가 없으면 언제 찍히는지 알 방법이 없다.
+  ///
+  /// 도중에 탭을 옮기면 false 를 돌려주고 촬영하지 않는다.
+  Future<bool> _countThreeTwoOne() async {
+    final gen = ++_countGen;
+    for (var n = 3; n >= 1; n--) {
+      if (gen != _countGen) return false;
+      countdown = n;
+      notifyListeners();
+      HapticFeedback.selectionClick();
+      unawaited(voice.announce('$n'));
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    if (gen != _countGen) {
+      return false;
+    }
+    countdown = null;
+    notifyListeners();
+    return true;
+  }
+
+  /// 세던 것을 끊는다 (탭 이동·촬영 취소).
+  void _cancelCountdown() {
+    _countGen++;
+    if (countdown != null) {
+      countdown = null;
+      notifyListeners();
+    }
+  }
+
   // ------------------------------------------------------------ navigation
   /// 진입 화면에서 플로우로 들어간다.
   ///
@@ -225,6 +293,8 @@ class AppState extends ChangeNotifier {
     // 붙잡고 있으면 새 화면에서 무엇을 해야 하는지 듣지 못한다.
     // (설정 탭처럼 새 안내가 없는 곳으로 갈 때도 반드시 끊어야 한다)
     if (t != tab) await voice.stopSpeaking();
+    _cancelCountdown();
+    _closeMicWindow();
     tab = t;
     // 탭에 들어오면 항상 처음(촬영)부터. 지난 결과·진행 중이던 분석 화면이
     // 남아 있으면 중간부터 시작하는 셈이다. 돌아오던 서버 응답은 세대(_askGen)
@@ -255,13 +325,56 @@ class AppState extends ChangeNotifier {
       _stopWarmUpTimer();
       _stopFramingWatch();
     }
-    // 카메라 탭에 들어올 때마다 렌즈 이물질 검사 → 더러우면 안내 후 원래 안내 멘트.
+    // 메이크업 촬영 탭에서만 도는 잘못된-제품 경고 (데모).
+    if (t == AppTab.cosmetic) {
+      _startAlertTimer();
+    } else {
+      _stopAlertTimer();
+    }
+    // 카메라 탭에 들어올 때마다 렌즈 이물질 검사.
     // 한 번만 하면 그 뒤에 묻은 물·지문은 영영 못 잡는다 — 실제로 그랬다.
+    //
+    // **안내는 검사를 기다리지 않는다.** 검사가 끝난 뒤에 말하게 했더니
+    // 탭에 들어와서 3초 가까이 조용했다 — 앞이 안 보이는 사용자에게 그
+    // 침묵은 "앱이 멈췄다" 다. 검사는 뒤에서 돌고, 더러우면 그때 끼어든다.
     if (t != AppTab.settings) {
-      unawaited(_runLensCheck(announce: announce));
+      if (announce) _announceCurrent();
+      unawaited(_runLensCheck(announce: false));
       return;
     }
     if (announce) _announceCurrent();
+  }
+
+  // ------------------------------------------------------- 데모: 잘못된 제품 경고
+  /// 올라갈 때마다 화면이 붉게 세 번 깜빡인다 (main_shell 의 _AlertFlash).
+  int alertPulse = 0;
+
+  Timer? _alertTimer;
+
+  static const _alertLine = '그건 마스카라예요. 입술에는 립스틱이나 틴트를 발라 주세요.';
+
+  /// 화장품 인식 탭에 머무는 동안 15초마다 — 잘못된 화장품을 집었다는
+  /// 시연 장면. 화면이 붉게 깜빡이고 같은 말을 읽는다. [demoScript] 전용.
+  void _startAlertTimer() {
+    if (!demoScript) return;
+    _alertTimer ??= Timer.periodic(const Duration(seconds: 15), (_) {
+      // 촬영 대기 화면에서만 — 분석·결과 위에 경고가 얹히면 무슨 일이
+      // 벌어진 건지 알 수 없다.
+      if (tab != AppTab.cosmetic || cosmeticStage != CosmeticStage.capture) {
+        return;
+      }
+      alertPulse++;
+      notifyListeners();
+      HapticFeedback.heavyImpact();
+      // 삐삐삐(2.4초)가 깜빡임과 함께 먼저 울리고, 말은 그 위로 들어온다.
+      unawaited(ScanSfx.instance.alarm());
+      voice.announce(_alertLine);
+    });
+  }
+
+  void _stopAlertTimer() {
+    _alertTimer?.cancel();
+    _alertTimer = null;
   }
 
   /// "처음으로": 화장품 식별 대기 화면으로.
@@ -321,9 +434,14 @@ class AppState extends ChangeNotifier {
       if (shot == null) return;
       if (await _lensDirty(shot)) {
         HapticFeedback.mediumImpact();
-        await voice.speak('카메라 렌즈에 이물질이 있어요. 렌즈를 닦고 시작해 주세요.');
+        // announce — 진행 중인 탭 안내를 끊는다. 렌즈가 더러우면 그 안내는
+        // 어차피 헛말이고, 이 말이 먼저 들려야 한다.
+        await voice.announce('카메라 렌즈에 이물질이 있어요. 렌즈를 닦고 시작해 주세요.');
       }
     } finally {
+      // 검사 자체는 0.5초면 끝나 알약이 깜박이고 사라진다. 최소 2.5초는
+      // 띄운다 — 곁에서 보는 사람이 "무엇을 하는 중" 인지 읽을 시간이다.
+      await Future<void>.delayed(const Duration(milliseconds: 2500));
       lensChecking = false;
       notifyListeners();
       if (announce) _announceCurrent();
@@ -345,9 +463,10 @@ class AppState extends ChangeNotifier {
       case AppTab.cosmetic:
         switch (cosmeticStage) {
           case CosmeticStage.capture:
+            // 기능 설명은 이 한 문장이 전부다 — 길게 늘어놓으면 라이브로
+            // 보고 있다는 핵심이 묻힌다.
             voice.announce('화장품 인식, 탭, 선택됨. ${_gestureGuide()}'
-                '화장품을 카메라 앞에 들어 주세요. 한 뼘, 15센티미터쯤이 좋아요. '
-                '준비되면 촬영하기 버튼을 누르거나 화면을 두 번 두드려 주세요.');
+                '지금 라이브로 메이크업 도구들을 판단하고 있어요.');
           case CosmeticStage.analyzing:
             voice.announce('화장품을 분석 중이에요. 조금만 기다려 주세요.');
           case CosmeticStage.result:
@@ -395,6 +514,10 @@ class AppState extends ChangeNotifier {
 
   Future<void> captureAndAnalyze() async {
     if (tab != AppTab.cosmetic || cosmeticStage != CosmeticStage.capture) return;
+    if (countdown != null) return; // 이미 세고 있다
+    if (!await _countThreeTwoOne()) return;
+    // 세는 동안 화면이 바뀌었을 수 있다 — 다시 확인한다
+    if (tab != AppTab.cosmetic || cosmeticStage != CosmeticStage.capture) return;
     cosmeticStage = CosmeticStage.analyzing;
     prediction = null;
     lastShotPath = null; // 새 사진이 오기 전까지 이전 사진을 띄우지 않는다
@@ -405,14 +528,20 @@ class AppState extends ChangeNotifier {
     final sw = Stopwatch()..start();
     final path = await camera.takePicture();
     lastShotPath = path;
+    // **여기서 알려야 한다.** 이게 없으면 분석 화면이 다시 그려지지 않아,
+    // 사진을 찍어 두고도 분석 내내 빈 판만 보였다.
+    notifyListeners();
 
     // 더러운 렌즈로 찍은 사진은 인식해 봐야 엉뚱한 답이 나온다.
     // 같은 모델의 다른 머리라 추론 한 번(~100ms)이면 된다.
     if (path != null && await _lensDirty(path)) {
       cosmeticStage = CosmeticStage.capture;
+      framingHint = _dirtyLens; // 같은 이유로 화면에도 남긴다
       notifyListeners();
       HapticFeedback.mediumImpact();
       await voice.announce(_dirtyLens);
+      framingHint = '';
+      notifyListeners();
       return;
     }
 
@@ -491,6 +620,9 @@ class AppState extends ChangeNotifier {
   Future<void> captureAndAsk() async {
     if (tab != AppTab.makeup || asking) return;
     if (makeupStage != MakeupStage.capture) return;
+    if (countdown != null) return; // 이미 세고 있다
+    if (!await _countThreeTwoOne()) return;
+    if (tab != AppTab.makeup || makeupStage != MakeupStage.capture) return;
 
     // 찍기 전에 프레이밍부터 본다.
     // 이걸 안 하면 찍고 20초 기다린 끝에야 "다시 찍어 주세요" 를 듣는다.
@@ -509,10 +641,15 @@ class AppState extends ChangeNotifier {
     // 입술을 분석한다" 를 겪었다. 질문을 고를 기회는 매번 있어야 한다.
     // (촬영 화면에서 음성으로 바로 질문하는 지름길은 그대로다 — 그건 ask() 경로)
     makeupStage = MakeupStage.question;
+    // **지난 발화를 지우고 시작한다.** 안 지우면 앞서 한 말이 화면에
+    // 그대로 떠 있고, 이어서 들어오는 부분 인식과 섞여 **예전 질문이
+    // 그대로 서버로 간다.**
+    _clearHeard();
     notifyListeners();
-    await voice.announce('궁금한 걸 질문해 보세요. '
-        '음성으로 질문하기 버튼을 누른 뒤 편하게 말씀하세요. '
-        '추천 질문을 골라도 됩니다.');
+    // **안내를 끝까지 읽는다.** 여기서 마이크를 스스로 열면 그 순간
+    // 안내가 잘린다 — 무엇을 해야 하는지 듣지 못한 채 마이크만 열려 있다.
+    // 듣기는 사용자가 화면을 눌렀을 때만 시작한다 ([askByVoice]).
+    await voice.announce('화면을 눌러 궁금한 걸 말씀해 주세요.');
   }
 
   /// 촬영해 둔 사진. 질문 단계에서 분석으로 넘어갈 때 쓴다.
@@ -543,10 +680,76 @@ class AppState extends ChangeNotifier {
   /// 질문 화면의 마이크 버튼 — 화면 두드리기와 같은 피드백을 준다.
   ///
   /// 「접근성 명세」: 녹음 시작과 종료를 서로 다른 진동·소리로 구분한다.
+  /// 질문 화면에서 마이크를 눌러 둔 시간. 이 동안에는 세션이 꺼져도 다시 연다.
+  DateTime? _keepMicUntil;
+  bool _reopening = false;
+
+  /// 다시 연 횟수. **무한히 열지 않는다** — 마이크가 실제로 죽었거나 권한이
+  /// 없으면 세션이 즉시 끝나는데, 그때 계속 다시 열면 표시가 깜빡이기만 하고
+  /// 사용자는 무엇이 잘못됐는지 알 수 없다.
+  int _reopens = 0;
+  static const _maxReopens = 4;
+
+  /// 마이크를 눌러 둔 상태인지. 화면 표시는 이 값을 쓴다 —
+  /// 인식기가 잠깐씩 꺼졌다 켜지는 걸 그대로 보여 주면 파형이 깜빡인다.
+  bool get micOpen => _keepMicUntil != null;
+
+  /// 안드로이드 인식기는 **짧은 침묵에도 스스로 꺼진다.** 말하려고 숨 고르는
+  /// 사이에 끊기면 사용자에게는 "눌렀는데 금방 끝난다" 로 보인다.
+  /// 아직 아무 말도 못 들었고 질문 화면에 있으면 조용히 다시 연다.
+  void _maybeReopenMic() {
+    final until = _keepMicUntil;
+    if (until == null || _reopening) return;
+    if (tab != AppTab.makeup || makeupStage != MakeupStage.question) {
+      _closeMicWindow();
+      return;
+    }
+    if (voice.isListening || voice.partialText.isNotEmpty) return;
+    if (DateTime.now().isAfter(until) || _reopens >= _maxReopens) {
+      final gaveUp = _reopens >= _maxReopens;
+      _closeMicWindow();
+      // 조용히 포기하면 죽은 마이크에 대고 계속 말하게 된다.
+      if (gaveUp && voice.partialText.isEmpty) {
+        unawaited(voice.speak('잘 못 들었어요. 다시 눌러서 말씀해 주세요.'));
+      }
+      return;
+    }
+    _reopening = true;
+    _reopens++;
+    Timer(const Duration(milliseconds: 300), () async {
+      _reopening = false;
+      if (_keepMicUntil == null) return;
+      if (tab != AppTab.makeup || makeupStage != MakeupStage.question) return;
+      if (voice.isListening || voice.partialText.isNotEmpty) return;
+      await voice.startListening();
+    });
+  }
+
+  void _closeMicWindow() {
+    if (_keepMicUntil == null) return;
+    _keepMicUntil = null;
+    _reopens = 0;
+    voice.suppressMissedPrompt = false;
+    notifyListeners();
+  }
+
   Future<void> askByVoice() async {
     if (tab != AppTab.makeup || makeupStage != MakeupStage.question) return;
-    // 안내가 뚝 끊기기만 하면 듣는 중인지 알 수 없다. 짧게 신호를 주고 듣는다.
-    await voice.announce('말씀하세요.');
+    // 다시 물으려고 누른 것이다 — 앞서 받아 적은 말은 지우고 새로 듣는다.
+    _clearHeard();
+    // 15초 동안은 끊겨도 다시 연다. 그동안 "못 들었어요" 는 말하지 않는다 —
+    // 다시 열 때마다 끼어들면 정작 말을 못 한다.
+    _keepMicUntil = DateTime.now().add(const Duration(seconds: 15));
+    _reopens = 0;
+    voice.suppressMissedPrompt = true;
+    notifyListeners();
+    // **안내를 기다리지 않는다.** announce 가 돌려주는 Future 는 TTS 엔진이
+    // 완료를 알려 줘야 끝나는데, 다음 안내가 stop() 을 부르면 그 통보가
+    // 오지 않는다. 그걸 await 하면 아래 듣기 시작이 통째로 실행되지 않는다 —
+    // "버튼을 눌러도 안 듣는다" 가 정확히 이 경로였다.
+    //
+    // 듣기 시작은 진동 + 짧은 소리로 알린다 ([startListening]). 말로 알리면
+    // 그 말꼬리가 마이크에 들어가 첫 단어를 먹기도 한다.
     await startListening();
   }
 
@@ -649,11 +852,24 @@ class AppState extends ChangeNotifier {
     if (await _lensDirty(shot)) {
       unawaited(camera.discard(shot));
       HapticFeedback.mediumImpact();
+      // **화면에도 띄운다.** 소리로만 알리면, 보고 있는 사람에게는 셔터를
+      // 눌렀는데 아무 일도 안 일어난 것처럼 보인다 — 실제로 "안 넘어간다" 는
+      // 신고가 이 경로였다.
+      framingHint = _dirtyLens;
+      notifyListeners();
       await voice.announce(_dirtyLens);
+      framingHint = '';
+      notifyListeners();
       return null;
     }
-    final f = await backend.checkFraming(shot);
-    if (f == null) return shot; // 서버 없음 — 판정 없이 이 프레임으로 간다
+    // **4초 상한.** 프레이밍 확인은 잘 되면 1초 안에 온다. 서버가 안 닿는
+    // 상태(와이파이 꺼짐, VPN 끊김)에서는 탐색 → 재시도로 16초까지 늘어질
+    // 수 있는데, 그동안 셔터 소리만 나고 화면이 안 넘어가서 "찍었는데
+    // 안 넘어간다" 가 됐다. 판정은 도우미지 관문이 아니다 — 늦으면 버린다.
+    final f = await backend
+        .checkFraming(shot)
+        .timeout(const Duration(seconds: 4), onTimeout: () => null);
+    if (f == null) return shot; // 서버 없음/지연 — 판정 없이 이 프레임으로 간다
     if (f.ok) return shot;
 
     framingHint = f.guidance;
@@ -686,6 +902,37 @@ class AppState extends ChangeNotifier {
 
   // ------------------------------------------------------------ guide chat
   bool asking = false;
+
+  /// **데모 대본 모드.** 켜면 메이크업 분석이 서버를 부르지 않고, 진행바가
+  /// 다 찬 뒤 항상 아래의 고정 결과(오른쪽 볼 + 입술)를 낸다. 화장품 인식
+  /// 탭의 15초 경고(마스카라)도 이 스위치에 묶여 있다.
+  ///
+  /// **기본은 꺼짐 — 실제 서버 분석을 쓴다.** 시연장에서 네트워크가
+  /// 불안할 때만 잠깐 켠다. 켜 두고 배포하면 어떤 질문에도 같은 답이
+  /// 나가므로, 켠 채로 커밋하지 마라.
+  static const demoScript = false;
+
+  static const _demoItems = [
+    AnalysisItem(
+      region: '오른쪽 볼',
+      state: '오른쪽 볼에 파우더가 고르게 펴지지 않고 뭉쳐 있어요.',
+      action: '퍼프로 가볍게 두드려 뭉친 파우더를 펴 주세요.',
+      type: 'base',
+      zone: '오른쪽볼',
+    ),
+    AnalysisItem(
+      region: '입술',
+      state: '입술 오른쪽 라인 밖으로 립이 살짝 번져 있어요.',
+      action: '면봉으로 바깥 라인을 따라 정리해 주세요.',
+      type: 'lip',
+      zone: '입술',
+    ),
+  ];
+
+  static const _demoReply = '오른쪽 볼에 파우더가 고르게 펴지지 않고 뭉쳐 있어요. '
+      '퍼프로 가볍게 두드려 뭉친 파우더를 펴 주세요. '
+      '그리고 입술 오른쪽 라인 밖으로 립이 살짝 번져 있어요. '
+      '면봉으로 바깥 라인을 따라 정리해 주세요.';
 
   /// 메이크업 질문: 촬영해 둔 사진 + 질문을 백엔드로 보내고 결과를 읽어 준다.
   /// 서버가 없으면 로컬 canned 응답으로 폴백.
@@ -734,6 +981,14 @@ class AppState extends ChangeNotifier {
     List<AnalysisItem> items = const [];
     Duration? latency;
     final sw = Stopwatch()..start();
+    if (demoScript) {
+      // ── 데모 대본 ── 서버를 부르지 않는다. 진행바(5초)가 다 차면
+      // 무조건 아래의 고정 결과로 넘어간다 — 시연 중에 서버·네트워크가
+      // 어떤 상태든 흐름이 끊기지 않아야 한다.
+      reply = _demoReply;
+      items = _demoItems;
+      voice.muted = false;
+    } else {
     try {
       // 답을 기다리는 20~30초 사이 핫스팟이 순단되면 연결이 끊긴다.
       // 서버는 답을 다 만들어 놓고 죽은 소켓에 보낸다 (18:41 로그로 확인) —
@@ -763,11 +1018,15 @@ class AppState extends ChangeNotifier {
       }
     } finally {
       voice.muted = false; // 응답 후 다시 듣기 시작
-      _stopProgress();
+      // **여기서 진행 타이머를 끄지 않는다.** 끄면 막대가 그 자리에서
+      // 얼어붙고, 아래에서 5초를 채우는 동안 30% 에 멈춰 있게 된다 —
+      // "다 안 됐는데 넘어간다" 가 이것이었다. 막대가 100% 를 찍은 뒤에 끈다.
+    }
     }
     // 그 사이 탭을 옮겼으면 이 결과는 버린다 — 다른 화면에서 결과가
     // 튀어나오거나, 돌아왔을 때 중간(결과)부터 시작하게 된다.
     if (gen != _askGen) {
+      _stopProgress();
       asking = false;
       return;
     }
@@ -776,12 +1035,29 @@ class AppState extends ChangeNotifier {
     // 얼굴을 보지도 않은 답이 매번 똑같이 나오니 "캐시된 답" 처럼 들렸다 —
     // 앞이 보이지 않는 사용자에게 지어낸 분석은 오답보다 나쁘다.
     if (reply == null) {
+      _stopProgress();
       makeupStage = MakeupStage.capture;
       asking = false;
       notifyListeners();
       await voice.announce('서버에 연결하지 못했어요. 잠시 뒤에 다시 시도해 주세요.');
       return;
     }
+    // **진행바가 다 찰 때까지 기다린다.** 눈금이 30%에서 갑자기 결과로
+    // 튀면, 방금까지 보던 것이 무엇이었는지 알 수 없다.
+    // **막대가 다 찰 때까지 기다린다.** 타이머는 아직 돌고 있어서 그동안
+    // 눈금이 계속 올라간다. 5초가 지나 이미 가득 찼으면 곧바로 지나간다.
+    final clock = _analysisClock;
+    if (clock != null && clock.elapsed < _progressGuess) {
+      await Future<void>.delayed(_progressGuess - clock.elapsed);
+      if (tab != AppTab.makeup || makeupStage != MakeupStage.analyzing) return;
+    }
+    _stopProgress();
+    // 100% 를 한 번 그리고 넘어간다. 98% 에서 사라지면 다 안 됐는데
+    // 넘어간 것으로 보인다.
+    analysisProgress = 1;
+    notifyListeners();
+    await Future<void>.delayed(const Duration(milliseconds: 320));
+    if (tab != AppTab.makeup || makeupStage != MakeupStage.analyzing) return;
     chat.add(ChatMessage(text: reply, fromUser: false, latency: latency));
     analysisItems = items;
     lastSpokenResult = reply.replaceAll('\n', ' ');
@@ -798,8 +1074,18 @@ class AppState extends ChangeNotifier {
   ///
   /// 서버가 진행률을 주지 않으므로 경과 시간으로 추정한다. 정확한 수치가 아니라
   /// "멈추지 않았다" 를 알리는 용도다 — 그래서 90%에서 멈춰 기다린다.
-  static const _progressGuess = Duration(seconds: 25);
+  /// 진행바가 100% 까지 차는 데 걸리는 시간.
+  ///
+  /// 서버는 남은 시간을 알려 주지 않는다. 그래서 **눈금은 예상이 아니라
+  /// 약속이다** — 5초 동안 채우고, 그 안에 답이 와도 5초는 채운 뒤에
+  /// 결과로 넘어간다. 5초가 지나도 안 오면 가득 찬 채로 기다린다.
+  /// 눈금이 중간에서 멈췄다 갑자기 끝나는 것보다 이쪽이 덜 불안하다.
+  static const _progressGuess = Duration(seconds: 5);
   Timer? _progressTimer;
+
+  /// 이번 분석이 시작된 시각. 결과가 빨리 와도 진행바를 다 채운 뒤에
+  /// 넘어가려고 잰다.
+  Stopwatch? _analysisClock;
   int _lastSpokenDecile = 0;
 
   /// 질문으로 어디를 보는지 짚는다. 서버 라우터와 같은 기준(입술 → 립 경로).
@@ -837,10 +1123,11 @@ class AppState extends ChangeNotifier {
     _lastSpokenDecile = 0;
     final lines = _progressLines(question);
     final sw = Stopwatch()..start();
+    _analysisClock = sw;
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
       final t = sw.elapsed.inMilliseconds / _progressGuess.inMilliseconds;
-      analysisProgress = (t.clamp(0.0, 1.0)) * 0.9; // 완료 전엔 90%까지만
+      analysisProgress = t.clamp(0.0, 1.0);
       notifyListeners();
       final decile = (analysisProgress * 10).floor();
       if (decile > _lastSpokenDecile && decile % 3 == 0) {

@@ -61,6 +61,10 @@ class ScanSfx {
   /// 분석이 끝났을 때. 바로 뒤에 TTS 가 결과를 읽는다.
   Future<void> done() => _oneShot('analysis_done.wav', 0.5);
 
+  /// 잘못된 제품 경고 — 굵은 삐삐삐 5번. 화면의 붉은 깜빡임 5번과 같은
+  /// 박자다 (둘 다 2.4초에 봉우리 5개). 소리와 색이 따로 놀면 두 사건이 된다.
+  Future<void> alarm() => _oneShot('alert_beeps.wav', 0.75);
+
   /// 분석 중 계속 도는 소리. 저음 위에 0.8초마다 삐빅 한 쌍이 얹혀 있다 —
   /// 서버가 오래 걸려도 소리가 끊기지 않아야 "아직 하고 있다" 로 들린다.
   Future<void> startHum() async {
