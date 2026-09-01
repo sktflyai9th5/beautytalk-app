@@ -43,6 +43,22 @@ parser.add_argument("--shell-tint", default="E4F4FA",
                     help="아바타 표면 색 (hex). 배경보다 살짝 어두워야 면이 보인다")
 parser.add_argument("--head", action="store_true",
                     help="얼굴 껍데기의 열린 뒤쪽을 닫아 머리(아바타)로 만든다")
+parser.add_argument("--head-mesh", default=None,
+                    help="실루엣으로 깎은 **실제 머리** (fit_head.py 가 낸 PLY). "
+                         "주면 뒤통수를 지어내는 대신 이걸 붙인다")
+parser.add_argument("--head-texture", default=None,
+                    help="머리에 입힐 텍스처 (bake_head_texture.py 가 구운 PNG). "
+                         "OBJ 로 준 머리에만 쓴다 — UV 가 있어야 한다")
+parser.add_argument("--head-fade", type=float, nargs=2, default=None,
+                    metavar=("LO", "HI"),
+                    help="머리 아래쪽을 흐린다. LO 아래는 완전히 투명, HI 위는 "
+                         "그대로 (아바타 좌표계의 Z). 깎기가 턱 밑에서 끊겨서 "
+                         "생기는 **잘린 단면**을 감춘다")
+parser.add_argument("--head-faces", type=int, default=1400,
+                    help="깎아낸 머리를 이 면 수까지 줄인다. 복셀에서 나온 "
+                         "십만 면짜리를 그대로 두면 격자가 천 조각처럼 보인다")
+parser.add_argument("--head-smooth", type=int, default=12,
+                    help="깎아낸 머리를 몇 번 문질러 계단을 지울지")
 parser.add_argument("--head-depth", type=float, default=1.05,
                     help="뒤통수 깊이 (얼굴 크기 대비)")
 parser.add_argument("--head-rings", type=int, default=6,
@@ -79,14 +95,41 @@ parser.add_argument("--scan-thickness", type=float, default=0.02,
                     help="스캔선 두께. 얇을수록 선으로 읽힌다")
 parser.add_argument("--scan-size", type=float, default=2.4,
                     help="스캔면 크기. 머리보다 조금만 크게 잡는다")
+parser.add_argument("--scan-halo", type=float, default=0.0,
+                    help="스캔선 뒤에 까는 테의 진하기 0~1")
+parser.add_argument("--scan-halo-color", default="FFFFFF",
+                    help="스캔선 테 색 (hex). 흰 스캔선에는 어두운 테라야 보인다")
 parser.add_argument("--scan-alpha", type=float, default=0.85,
                     help="스캔선 불투명도. 선은 또렷해야 읽힌다")
 parser.add_argument("--scan-cycles", type=float, default=1.0,
                     help="한 루프에서 위아래로 몇 번 훑을지")
 parser.add_argument("--head-wire", default="8FC4DA",
                     help="아바타 전체를 두르는 옅은 격자 색 (hex)")
+parser.add_argument("--bare-face", action="store_true",
+                    help="**사진 얼굴 면을 안 그린다.** 얼굴 격자는 선과 점, 그리고 "
+                         "부위 위치를 잡는 데만 쓰고 표면은 머리 메시가 통째로 "
+                         "맡는다. 사진 한 장을 머리 앞에 덧대면 사진이 끝나는 자리에 "
+                         "경계선이 남고 그 뒤로 머리 텍스처의 귀가 하나 더 겹쳐 "
+                         "보인다 — 얼굴과 머리가 한 메시면 그 선이 아예 없다")
+parser.add_argument("--no-head-wire", action="store_true",
+                    help="머리에 격자를 두르지 않는다. 지어낸 뒤통수에는 부피를 "
+                         "읽히려고 필요했지만, 사진 색이 입혀진 실제 머리 위에 "
+                         "얹으면 **가발 망**처럼 보인다")
 parser.add_argument("--head-wire-scale", type=float, default=0.9,
                     help="아바타 격자 굵기 (얼굴 마스크 대비)")
+parser.add_argument("--head-wire-blocks", type=int, default=0,
+                    help="머리 격자를 **복셀**로 각지게 짓는다 (옥트리 깊이). "
+                         "4 면 한 변 16칸, 5 면 32칸. 0 이면 안 쓰고 "
+                         "--head-wire-faces 로 줄인다")
+parser.add_argument("--head-wire-lift", type=float, default=0.0,
+                    help="머리 격자를 표면에서 이만큼 띄운다 (얼굴 반지름 1 기준). "
+                         "0 이면 표면에 붙어 머리 요철에 반쯤 파묻힌다")
+parser.add_argument("--head-wire-faces", type=int, default=0,
+                    help="머리 격자를 이 면 수로 줄인 뒤에 두른다. 0 이면 안 줄인다. "
+                         "밀집 복원 머리는 면이 3만 장이라 그대로 두르면 격자가 "
+                         "아니라 **흰 천**이 된다 — 눈에 코 하나 크기의 그물이 "
+                         "보이려면 천 장 언저리로 줄여야 한다. 머리 표면(사진)은 "
+                         "그대로 두고 **격자 사본만** 줄이므로 텍스처는 안 상한다")
 parser.add_argument("--thickness", type=float, default=0.006, help="와이어 두께")
 parser.add_argument("--dots", action="store_true", help="고른 정점에 하이라이트 찍기")
 parser.add_argument("--dot-scale", type=float, default=3.4,
@@ -111,6 +154,17 @@ def hex_to_linear(hex_str):
     return (out[0], out[1], out[2], 1.0)
 
 
+def srgb_to_linear(c):
+    """0~1 sRGB 한 채널을 Blender 가 쓰는 선형 값으로.
+
+    정점 색을 이 변환 없이 넣으면 **화면에서 두 배로 밝아진다.** Blender 는
+    BYTE_COLOR 에 넣는 값을 선형으로 보고 sRGB 로 저장했다가 셰이더에서 도로
+    선형으로 읽는데, sRGB 값을 그대로 넣으면 그 왕복에서 한 번 밝아진 채로
+    남는다. 실제로 머리카락(어두운 색)이 회색 수영모처럼 나왔다.
+    """
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
 WIRE_RGBA = hex_to_linear(args.color)
 
 
@@ -133,6 +187,382 @@ def reset_scene():
 
 
 # ---------------------------------------------------------------- 메시 확보
+
+def read_ascii_ply(path):
+    """fit_head.py 가 쓴 ascii PLY 를 읽는다 (정점, 면, 색).
+
+    색은 있을 수도 없을 수도 있다 — color_head.py 를 거쳤으면 정점마다
+    머리카락 색이 들어 있다.
+    """
+    with open(path, "r", encoding="utf-8") as fp:
+        counts, current, props = {}, None, []
+        while True:
+            line = fp.readline()
+            if not line:
+                raise SystemExit(f"헤더가 끝나기 전에 파일이 끝났다: {path}")
+            line = line.strip()
+            if line.startswith("element"):
+                _, name, count = line.split()[:3]
+                counts[name] = int(count)
+                current = name
+            elif line.startswith("property") and current == "vertex":
+                props.append(line.split()[2])
+            elif line == "end_header":
+                break
+
+        has_color = {"red", "green", "blue"} <= set(props)
+        verts, colors = [], []
+        for _ in range(counts.get("vertex", 0)):
+            row = fp.readline().split()
+            verts.append(tuple(float(v) for v in row[:3]))
+            if has_color:
+                colors.append(tuple(
+                    int(float(row[props.index(c)])) / 255.0
+                    for c in ("red", "green", "blue")))
+        faces = []
+        for _ in range(counts.get("face", 0)):
+            parts = [int(v) for v in fp.readline().split()]
+            faces.append(tuple(parts[1:1 + parts[0]]))
+    return verts, faces, (colors if has_color else None)
+
+
+def read_obj_uv(path):
+    """prep_head.py 가 낸 OBJ 에서 (정점, UV, 삼각형) 을 읽는다.
+
+    삼각형은 (정점번호, UV번호) 쌍으로 들고 있는다 — 한 정점이 UV 조각마다
+    다른 자리를 갖기 때문에 정점 하나에 UV 하나로 접으면 조각이 뭉개진다.
+    """
+    verts, uvs, faces = [], [], []
+    with open(path, "r", encoding="utf-8") as fp:
+        for line in fp:
+            if line.startswith("v "):
+                verts.append(tuple(float(v) for v in line.split()[1:4]))
+            elif line.startswith("vt "):
+                uvs.append(tuple(float(v) for v in line.split()[1:3]))
+            elif line.startswith("f "):
+                corners = []
+                for chunk in line.split()[1:]:
+                    part = chunk.split("/")
+                    vi = int(part[0]) - 1
+                    ti = int(part[1]) - 1 if len(part) > 1 and part[1] else -1
+                    corners.append((vi, ti))
+                for i in range(1, len(corners) - 1):
+                    faces.append((corners[0], corners[i], corners[i + 1]))
+    return verts, uvs, faces
+
+
+def reduce_wire(wire, target, lift, face_box=None):
+    """머리 격자를 **고른 삼각형**으로 줄인다.
+
+    밀집 복원 머리는 면이 3만 장이라 그대로 두르면 격자가 아니라 흰 천이 된다.
+    그런데 그냥 줄이기만 하면 못 쓴다 — 여기서 두 번 헛디뎠다.
+
+    - 데시메이트는 **바늘처럼 가는 삼각형**을 남긴다. 그 위에 「Even Thickness」
+      로 선을 두르면 뾰족한 꼭짓점마다 선이 밖으로 늘어나 **별처럼 뻗친 가시**가
+      선다 (머리에 흰 생채기가 난 것처럼 보였다).
+    - 그렇다고 Even Thickness 를 끄면 비스듬한 면에서 선이 종잇장처럼 얇아져
+      **토막토막 끊긴다** — 격자가 아니라 흩뿌린 부스러기가 된다.
+
+    고칠 자리는 선이 아니라 **면**이다. 줄인 뒤에 겹친 점을 녹이고 삼각형을
+    다시 이어(`beautify_fill`) 모양을 고르게 만들면, 가시가 설 뾰족한 각이
+    애초에 생기지 않는다.
+
+    그리고 **띄운다** ([lift]). 이게 없으면 위 두 가지를 다 해도 격자가
+    토막난다 — 문지른 사본은 울퉁불퉁한 원래 표면보다 안쪽으로 내려앉아서,
+    머리 밖으로 삐져나온 조각만 보이기 때문이다. 법선 방향으로 조금 밀어
+    머리 위에 얹으면 한 겹으로 이어져 보인다.
+    """
+    calm = wire.modifiers.new("smooth", "SMOOTH")
+    calm.factor = 0.6
+    # 요철만 죽인다. 세게 문지르면 머리가 쪼그라들어 격자가 표면 안쪽으로
+    # 파묻힌다 — 가시를 잡으려고 16까지 올렸던 값인데, 관으로 바꾼 뒤로는
+    # 가시가 안 생기므로 되돌린다.
+    calm.iterations = 6
+    thin = wire.modifiers.new("decimate", "DECIMATE")
+    thin.ratio = target / len(wire.data.polygons)
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    baked = bpy.data.meshes.new_from_object(wire.evaluated_get(depsgraph))
+    wire.modifiers.clear()
+    wire.data = baked
+
+    bm = bmesh.new()
+    bm.from_mesh(baked)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-4)
+    bmesh.ops.dissolve_degenerate(bm, dist=1e-4, edges=bm.edges[:])
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    bmesh.ops.beautify_fill(bm, faces=bm.faces[:], edges=bm.edges[:])
+
+    if lift:
+        # **머리 중심에서 바깥으로 밀어 케이지로 띄운다.**
+        #
+        # 여기서 세 번 헛디뎠다. 격자를 머리 표면에 붙여 두면 — 법선으로
+        # 밀든, 셰이더랩으로 표면을 따라가게 하든 — 반드시 어딘가는 살에
+        # 잠긴다. 밀집 복원한 머리카락은 요철이 굵고 들쭉날쭉해서, 잠긴
+        # 자리의 선은 사라지고 삐져나온 정점 언저리만 남아 **점에서 뻗어
+        # 나온 별**이 곳곳에 생긴다 (셰이더랩은 표면 법선이 곳곳에서
+        # 뒤집혀 있어 안쪽으로 미는 자리까지 있었다).
+        #
+        # 표면에 붙이려는 것 자체를 그만뒀다. 머리를 감싸는 **케이지**로
+        # 띄우면 요철에 걸릴 일이 없어 한 겹으로 이어지고, 실루엣 밖으로
+        # 살짝 나온 테두리가 오히려 "스캔하는 중" 으로 읽힌다.
+        mid = Vector((0, 0, 0))
+        for v in bm.verts:
+            mid += v.co
+        mid /= max(len(bm.verts), 1)
+        for v in bm.verts:
+            away = v.co - mid
+            if away.length > 1e-6:
+                v.co += away.normalized() * lift
+
+    if face_box is not None:
+        # **얼굴 앞을 지나는 조각만 걷어낸다.**
+        #
+        # 선을 적게 두면서 끊기지 않으려면 케이지를 넉넉히 띄워야 하는데
+        # (성기게 두면 머리 요철에 잠겨 토막난다), 그러면 앞쪽 절반이 얼굴
+        # 사진 **앞으로** 나와 이목구비를 가로지른다. 그 자리는 어차피 얼굴
+        # 격자가 맡고 있으므로 지운다.
+        #
+        # 얼굴 상자 **안**이면서 얼굴보다 앞인 것만 지운다. 그 밖(머리카락이
+        # 있는 옆·위)은 앞쪽이라도 남겨야 실루엣을 두르는 테가 살아 있다.
+        x0, x1, z0, z1, mid_y = face_box
+        ahead = [v for v in bm.verts
+                 if v.co.y < mid_y and x0 <= v.co.x <= x1 and z0 <= v.co.z <= z1]
+        if ahead:
+            bmesh.ops.delete(bm, geom=ahead, context="VERTS")
+
+    bm.to_mesh(baked)
+    bm.free()
+    baked.update()
+
+
+def blockify_wire(wire, depth, lift, face_box=None):
+    """머리 격자를 **복셀로 각지게** 다시 짓는다 (레고 느낌).
+
+    복원한 머리를 그냥 줄여서 두르면 끝내 못 쓴다. 유기체 표면을 데시메이트
+    하면 삼각형 모양이 제각각이라, 성기게 두면 요철에 잠겨 **토막나고**
+    촘촘히 두면 선이 수백 개인 **그물망**이 된다. 그 사이가 없다.
+
+    복셀은 그 둘을 한 번에 푼다. 격자가 축에 정렬된 **정사각형 한 종류**라
+    선이 규칙적으로 이어지고, 칸 수(=`depth`)로 개수를 정확히 정할 수 있고,
+    무엇보다 각진 계단 모양 자체가 "스캔해서 만든 것" 으로 읽힌다.
+
+    `depth` 는 옥트리 깊이다 — 4 면 한 변 16칸, 5 면 32칸.
+    """
+    rm = wire.modifiers.new("remesh", "REMESH")
+    rm.mode = "BLOCKS"
+    rm.octree_depth = depth
+    rm.use_remove_disconnected = False
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    baked = bpy.data.meshes.new_from_object(wire.evaluated_get(depsgraph))
+    wire.modifiers.clear()
+    wire.data = baked
+
+    bm = bmesh.new()
+    bm.from_mesh(baked)
+    if lift:
+        # 복셀 면은 원래 표면보다 안쪽에 놓이기도 한다. 중심에서 바깥으로
+        # 조금 밀어 머리 위에 얹는다.
+        mid = Vector((0, 0, 0))
+        for v in bm.verts:
+            mid += v.co
+        mid /= max(len(bm.verts), 1)
+        for v in bm.verts:
+            away = v.co - mid
+            if away.length > 1e-6:
+                v.co += away.normalized() * lift
+    if face_box is not None:
+        # 얼굴 사진 앞을 지나는 칸만 걷어낸다. 그 자리는 얼굴 격자가 맡는다.
+        x0, x1, z0, z1, mid_y = face_box
+        ahead = [v for v in bm.verts
+                 if v.co.y < mid_y and x0 <= v.co.x <= x1 and z0 <= v.co.z <= z1]
+        if ahead:
+            bmesh.ops.delete(bm, geom=ahead, context="VERTS")
+    bm.to_mesh(baked)
+    bm.free()
+    baked.update()
+
+
+def tube_edges(obj, radius):
+    """면을 지우고 남은 엣지를 **둥근 관**으로 바꾼다.
+
+    Wireframe 모디파이어는 *면을 밀어* 선을 만든다. 줄인 유기체 메시에는
+    가느다란 삼각형이 섞여 있어서, 두께를 고르게 맞추면 뾰족한 꼭짓점마다
+    선이 밖으로 뻗쳐 **가시**가 서고, 안 맞추면 비스듬한 면에서 **종잇장처럼
+    얇아져 끊긴다.** 둘 다 그 방식의 성질이라 값으로는 못 피한다.
+
+    얼굴 격자는 처음부터 이 방법을 쓴다 — 엣지를 커브로 바꿔 관을 씌우면
+    선 하나하나가 독립된 원기둥이라 보는 각도와 무관하게 굵기가 같다.
+    머리 격자도 같은 방법을 써야 두 격자가 한 벌로 보인다.
+    """
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.delete(bm, geom=bm.faces[:], context="FACES_ONLY")
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.convert(target="CURVE")
+    tube = bpy.context.view_layer.objects.active
+    tube.data.bevel_depth = radius
+    tube.data.bevel_resolution = 1
+    tube.data.fill_mode = "FULL"
+    tube.data.use_fill_caps = True
+    return tube
+
+
+def append_textured_hull(obj, path):
+    """UV 를 편 머리(OBJ)를 얼굴 격자에 이어 붙인다.
+
+    UV 는 얼굴이 쓰는 층에 **그대로 얹는다.** UV 는 면의 꼭짓점마다 하나씩
+    붙는 값이라, 얼굴 쪽 꼭짓점은 사진 좌표를 그대로 두고 머리 쪽만 텍스처
+    좌표를 넣으면 재질만 갈라 주면 된다.
+    """
+    verts, uvs, faces = read_obj_uv(path)
+    if not faces:
+        raise SystemExit(f"머리 OBJ 에 면이 없다: {path}")
+
+    mesh = obj.data
+    offset = len(mesh.vertices)
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    added = [bm.verts.new(v) for v in verts]
+    bm.verts.ensure_lookup_table()
+    made = 0
+    for tri in faces:
+        try:
+            bm.faces.new([added[c[0]] for c in tri])
+            made += 1
+        except ValueError:
+            pass
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+
+    # 붙인 면의 꼭짓점마다 UV 를 적는다. bmesh 는 면을 뒤에 이어 붙이므로
+    # 얼굴 면 개수 뒤부터가 머리다.
+    layer = mesh.uv_layers.active or mesh.uv_layers.new(name="face")
+    head_polys = [p for p in mesh.polygons
+                  if all(v >= offset for v in p.vertices)]
+    lookup = {}
+    for tri in faces:
+        key = tuple(sorted(c[0] + offset for c in tri))
+        lookup[key] = tri
+    written = 0
+    for poly in head_polys:
+        tri = lookup.get(tuple(sorted(poly.vertices)))
+        if tri is None:
+            continue
+        by_vertex = {c[0] + offset: c[1] for c in tri}
+        for loop_index in poly.loop_indices:
+            ti = by_vertex.get(mesh.loops[loop_index].vertex_index, -1)
+            if 0 <= ti < len(uvs):
+                layer.data[loop_index].uv = uvs[ti]
+                written += 1
+
+    print(f"[holo] 머리(UV) 붙임: 면 {made} / UV {written}개 "
+          f"(얼굴 뒤 {offset}번부터)")
+
+
+def append_hull(obj, path):
+    """깎아낸 머리를 얼굴 격자와 **한 메시로** 합친다.
+
+    따로 두면 normalize·회전·재질을 두 번 관리해야 하고 둘이 어긋나기 쉽다.
+    한 메시 안에서 얼굴 면 뒤에 이어 붙이면 기존 코드가 그대로 돈다 —
+    사진은 앞쪽 면에만, 격자는 뒤쪽 면에만 걸린다.
+    """
+    verts, faces, colors = read_ascii_ply(path)
+    if not faces:
+        raise SystemExit(f"머리 메시에 면이 없다: {path}")
+
+    # 복셀에서 나온 메시라 계단이 지고 면이 십만 장이다. 문질러 계단을 지우고
+    # 면을 줄인 **뒤에** 붙인다 — 그대로 두면 격자가 천 조각처럼 보이고,
+    # 붙인 뒤에 줄이면 얼굴 격자까지 같이 줄어든다.
+    temp_mesh = bpy.data.meshes.new("holo_head_raw")
+    temp_mesh.from_pydata(verts, [], faces)
+    temp_mesh.update()
+    if colors:
+        # 색은 **줄이기 전에** 얹어야 데시메이트가 같이 섞어 준다. 나중에
+        # 얹으려 하면 정점이 이미 사라져서 번호가 안 맞는다.
+        layer = temp_mesh.color_attributes.new(
+            name="head", type="BYTE_COLOR", domain="CORNER")
+        for loop in temp_mesh.loops:
+            r, g, b = colors[loop.vertex_index]
+            layer.data[loop.index].color = (srgb_to_linear(r), srgb_to_linear(g),
+                                            srgb_to_linear(b), 1.0)
+    temp = bpy.data.objects.new("holo_head_raw", temp_mesh)
+    bpy.context.collection.objects.link(temp)
+
+    if args.head_smooth > 0:
+        smooth = temp.modifiers.new("smooth", "SMOOTH")
+        smooth.factor = 0.7
+        smooth.iterations = args.head_smooth
+    if 0 < args.head_faces < len(faces):
+        decimate = temp.modifiers.new("decimate", "DECIMATE")
+        decimate.ratio = args.head_faces / len(faces)
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    baked = bpy.data.meshes.new_from_object(temp.evaluated_get(depsgraph))
+    reduced = [tuple(v.co) for v in baked.vertices]
+    reduced_faces = [tuple(p.vertices) for p in baked.polygons]
+    reduced_colors = None
+    if colors and baked.color_attributes:
+        # 줄인 메시의 코너 색을 정점으로 되돌린다 (한 정점에 여러 코너가
+        # 붙지만 같은 값이라 첫 것을 쓰면 된다).
+        source = baked.color_attributes[0].data
+        reduced_colors = [(1.0, 1.0, 1.0)] * len(reduced)
+        for loop in baked.loops:
+            c = source[loop.index].color
+            reduced_colors[loop.vertex_index] = (c[0], c[1], c[2])
+    bpy.data.objects.remove(temp, do_unlink=True)
+    bpy.data.meshes.remove(temp_mesh)
+    bpy.data.meshes.remove(baked)
+
+    mesh = obj.data
+    offset = len(mesh.vertices)
+    if reduced_colors:
+        # 얼굴 쪽은 사진을 입히므로 흰색으로 채워 두고, 머리 쪽만 실제 색을
+        # 넣는다. 재질이 갈려 있어서 얼굴 값은 쓰이지 않는다.
+        obj["holo_head_colors"] = [c for rgb in reduced_colors for c in rgb]
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    added = [bm.verts.new(v) for v in reduced]
+    bm.verts.ensure_lookup_table()
+    made = 0
+    for f in reduced_faces:
+        try:
+            bm.faces.new([added[i] for i in f])
+            made += 1
+        except ValueError:
+            # 같은 면이 두 번 오면 bmesh 가 거부한다. 건너뛰면 된다.
+            pass
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+
+    if reduced_colors:
+        # 합친 메시에 색을 다시 얹는다. 얼굴 쪽 정점은 흰색으로 둔다 —
+        # 거기는 사진 재질이라 이 값을 안 본다.
+        layer = mesh.color_attributes.get("head")
+        if layer is None:
+            layer = mesh.color_attributes.new(
+                name="head", type="BYTE_COLOR", domain="CORNER")
+        for loop in mesh.loops:
+            i = loop.vertex_index - offset
+            if 0 <= i < len(reduced_colors):
+                r, g, b = reduced_colors[i]
+            else:
+                r = g = b = 1.0
+            layer.data[loop.index].color = (r, g, b, 1.0)
+
+    print(f"[holo] 깎아낸 머리 붙임: 면 {len(faces)} -> {made} "
+          f"(얼굴 뒤 {offset}번부터)"
+          + (" / 사진 색 입힘" if reduced_colors else ""))
+
 
 def import_face_json(path):
     """face_to_mesh.py 가 뽑은 얼굴 격자를 그대로 메시로 만든다.
@@ -171,6 +601,26 @@ def import_face_json(path):
     bpy.context.collection.objects.link(obj)
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
+
+    # 실루엣으로 깎은 머리를 **여기서** 이어 붙인다. 뒤(build_hologram)에서
+    # 붙이면 그 전에 normalize 가 얼굴만 보고 크기를 정해서 둘이 어긋난다.
+    # 얼굴 면 개수를 남겨 두면 그 뒤 면들은 뒤통수로 취급된다 (재질·격자).
+    obj["holo_face_polys"] = 0 if args.bare_face else len(mesh.polygons)
+    if args.bare_face:
+        # 얼굴 면을 지운다. 선과 점은 엣지에서 뽑으므로 그대로 남는다.
+        mesh.polygons.foreach_set("select", [True] * len(mesh.polygons))
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        bmesh.ops.delete(bm, geom=list(bm.faces), context="FACES_ONLY")
+        bm.to_mesh(mesh)
+        bm.free()
+        mesh.update()
+        print(f"[holo] 사진 얼굴 면을 뺐다 — 표면은 머리 메시가 맡는다")
+    if args.head_mesh:
+        if os.path.splitext(args.head_mesh)[1].lower() == ".obj":
+            append_textured_hull(obj, args.head_mesh)
+        else:
+            append_hull(obj, args.head_mesh)
     # 이 격자는 이미 다듬어져 있다. 리토폴로지를 돌리면 도로 잘게 쪼개진다.
     obj["holo_prepared"] = True
     # 이목구비 윤곽은 격자와 **따로** 들고 있다가 더 굵게 뽑는다. 같은 굵기로
@@ -182,6 +632,8 @@ def import_face_json(path):
     obj["holo_lines"] = [i for e in payload["edges"] for i in e]
     # 하이라이트로 찍을 정점. 2D 오버레이가 쓰는 목록과 같아야 이어져 보인다.
     obj["holo_highlights"] = list(payload.get("highlights", []))
+    # 성근 격자의 삼각형. 결과 화면에서 부위를 삼각형 모양으로 밝힌다.
+    obj["holo_line_faces"] = [i for f in payload.get("line_faces", []) for i in f]
     print(f"[holo] 얼굴 격자: 정점 {len(mesh.vertices)} / 엣지 {len(mesh.edges)}"
           f" / 면 {len(mesh.polygons)} (출처 {payload.get('source_frame', '?')})")
     return obj
@@ -483,7 +935,7 @@ def lift(obj):
     obj.location.y -= args.line_lift
 
 
-def textured_material(name, path):
+def textured_material(name, path, fade=None):
     """사진을 그대로 발광으로 내보내는 재질.
 
     조명을 쓰지 않는다. 사진에 이미 빛이 들어 있어서, 다시 비추면 두 번
@@ -516,7 +968,15 @@ def textured_material(name, path):
     else:
         nt.links.new(tex.outputs["Color"], emit.inputs["Color"])
 
-    nt.links.new(emit.outputs["Emission"], out.inputs["Surface"])
+    if fade:
+        # **알파 합성(BLENDED)을 쓰면 안 된다.** 깊이 정렬을 하지 않아서 닫힌
+        # 머리의 안쪽 면이 앞면 위로 비쳐 조각난 것처럼 보인다. 디더링은
+        # 깊이를 그대로 쓰고, 어차피 뒤에서 글로우가 번지게 하므로 점이 튀지 않는다.
+        if hasattr(mat, "surface_render_method"):
+            mat.surface_render_method = "DITHERED"
+        fade_alpha(nt, emit.outputs["Emission"], out, fade[0], fade[1])
+    else:
+        nt.links.new(emit.outputs["Emission"], out.inputs["Surface"])
     return mat
 
 
@@ -540,6 +1000,23 @@ def add_scan_plane(rig):
     solid.thickness = args.scan_thickness
     solid.offset = 0.0
 
+    # 뒤에 흰 판을 한 겹 더 깐다. 어두운 스캔선 혼자로는 밝은 얼굴 위에서
+    # 눈에 안 띈다 — 흰 테가 둘려야 **떠 있는 막대**로 읽히고 멀리서도 보인다.
+    if args.scan_halo > 0:
+        bpy.ops.mesh.primitive_circle_add(
+            vertices=64, radius=args.scan_size / 2, fill_type="NGON")
+        glow = bpy.context.active_object
+        glow.name = "holo_scan_halo"
+        glow.data.materials.clear()
+        glow.data.materials.append(
+            scan_material("holo_scan_halo_mat", color=args.scan_halo_color,
+                          alpha=args.scan_halo))
+        gs = glow.modifiers.new("thickness", "SOLIDIFY")
+        # 심지보다 넉넉해야 테두리가 된다.
+        gs.thickness = args.scan_thickness * 3.4
+        gs.offset = 0.0
+        glow.parent = plane
+
     # 기울기는 매 프레임 카메라를 향해 다시 잡는다 (scan_edge_on).
 
     # 리그에 붙이지 않는다. 붙이면 머리가 좌우로 훑을 때 판이 같이 돌아
@@ -548,14 +1025,14 @@ def add_scan_plane(rig):
     return plane
 
 
-def scan_material(name):
+def scan_material(name, color=None, alpha=None):
     """스캔면. 반투명이어야 얼굴을 가리지 않고 훑고 지나가는 것으로 보인다."""
     mat = bpy.data.materials.new(name)
     nt = mat.node_tree
     nt.nodes.clear()
 
     emit = nt.nodes.new("ShaderNodeEmission")
-    emit.inputs["Color"].default_value = hex_to_linear(args.scan_color)
+    emit.inputs["Color"].default_value = hex_to_linear(color or args.scan_color)
     emit.inputs["Strength"].default_value = args.emit
     transp = nt.nodes.new("ShaderNodeBsdfTransparent")
     mix = nt.nodes.new("ShaderNodeMixShader")
@@ -571,7 +1048,8 @@ def scan_material(name):
     fade = nt.nodes.new("ShaderNodeMapRange")
     fade.inputs["From Min"].default_value = args.scan_size * 0.40
     fade.inputs["From Max"].default_value = args.scan_size * 0.5
-    fade.inputs["To Min"].default_value = args.scan_alpha
+    fade.inputs["To Min"].default_value = (
+        args.scan_alpha if alpha is None else alpha)
     fade.inputs["To Max"].default_value = 0.0
     fade.clamp = True
 
@@ -589,6 +1067,51 @@ def scan_material(name):
             break
         except (TypeError, AttributeError):
             continue
+    return mat
+
+
+def fade_alpha(nt, shader, out, lo, hi):
+    """아래로 갈수록 투명해지게 셰이더에 알파를 물린다.
+
+    깎아낸 머리는 턱 밑에서 끊긴다 — 그 아래 머리카락은 실루엣에서 이미
+    사라져서 되살릴 수가 없다. 단면을 그대로 두면 잘린 살점처럼 보이므로,
+    **홀로그램답게 흐려서** 끝낸다.
+    """
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    ramp = nt.nodes.new("ShaderNodeMapRange")
+    ramp.inputs[1].default_value = lo
+    ramp.inputs[2].default_value = hi
+    ramp.clamp = True
+    transparent = nt.nodes.new("ShaderNodeBsdfTransparent")
+    mix = nt.nodes.new("ShaderNodeMixShader")
+
+    nt.links.new(geo.outputs["Position"], sep.inputs["Vector"])
+    nt.links.new(sep.outputs["Z"], ramp.inputs["Value"])
+    nt.links.new(transparent.outputs["BSDF"], mix.inputs[1])
+    nt.links.new(shader, mix.inputs[2])
+    nt.links.new(ramp.outputs["Result"], mix.inputs["Fac"])
+    nt.links.new(mix.outputs["Shader"], out.inputs["Surface"])
+
+
+def head_color_material(name):
+    """깎아낸 머리에 **정점 색**을 그대로 쓴다.
+
+    실루엣으로 깎은 머리를 단색으로 칠하면 하얀 수영모처럼 보인다.
+    color_head.py 가 촬영본에서 읽어 온 색을 그대로 내보내면 머리카락은
+    머리카락 색이 되고, 얼굴 사진과 한 사람으로 읽힌다.
+    """
+    mat = bpy.data.materials.new(name)
+    nt = mat.node_tree
+    nt.nodes.clear()
+
+    attribute = nt.nodes.new("ShaderNodeAttribute")
+    attribute.attribute_name = "head"
+    emit = nt.nodes.new("ShaderNodeEmission")
+    emit.inputs["Strength"].default_value = 1.0
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    nt.links.new(attribute.outputs["Color"], emit.inputs["Color"])
+    nt.links.new(emit.outputs["Emission"], out.inputs["Surface"])
     return mat
 
 
@@ -612,6 +1135,21 @@ def shell_material(name):
     out = nt.nodes.new("ShaderNodeOutputMaterial")
     nt.links.new(emit.outputs["Emission"], out.inputs["Surface"])
     return mat
+
+
+def fill_line_mesh(mesh, obj, pairs):
+    """선 쌍만으로 메시를 채운다. **쓰는 정점만** 넣는 게 핵심이다.
+
+    예전에는 원본의 정점을 통째로 넣고 선만 얹었다. 얼굴 격자뿐일 때는 남는
+    점이 없어 문제가 안 됐는데, 깎아낸 머리를 같은 메시에 붙이자 쓰지 않는
+    정점이 5만 개 딸려 들어왔다. 이 메시를 커브로 바꾸는 순간 그 외톨이
+    점들이 제멋대로 이어져 **화면을 가로지르는 실**이 됐다.
+    """
+    used = sorted({i for pair in pairs for i in pair})
+    remap = {old: new for new, old in enumerate(used)}
+    coords = [obj.data.vertices[i].co.copy() for i in used]
+    mesh.from_pydata(coords, [(remap[a], remap[b]) for a, b in pairs], [])
+    mesh.update()
 
 
 def build_hologram(obj):
@@ -639,8 +1177,7 @@ def build_hologram(obj):
             pairs = [(flat_lines[i], flat_lines[i + 1])
                      for i in range(0, len(flat_lines) - 1, 2)]
             lmesh = bpy.data.meshes.new("holo_wire_mesh")
-            lmesh.from_pydata([v.co.copy() for v in obj.data.vertices], pairs, [])
-            lmesh.update()
+            fill_line_mesh(lmesh, obj, pairs)
             wire.data = lmesh
         elif len(wire.data.polygons) > 0:
             bm = bmesh.new()
@@ -681,8 +1218,7 @@ def build_hologram(obj):
     if flat:
         edges = [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2)]
         cmesh = bpy.data.meshes.new("holo_contour_mesh")
-        cmesh.from_pydata([v.co.copy() for v in obj.data.vertices], edges, [])
-        cmesh.update()
+        fill_line_mesh(cmesh, obj, edges)
         contour = bpy.data.objects.new("holo_contour", cmesh)
         bpy.context.collection.objects.link(contour)
 
@@ -738,9 +1274,11 @@ def build_hologram(obj):
     else:
         # 뒤통수는 나중에 붙는다. 사진은 얼굴 쪽 면에만 있으므로,
         # 여기서 개수를 세 뒀다가 그 뒤 면들은 단색으로 칠한다.
-        face_polys = len(obj.data.polygons)
-        if args.head:
-            close_back(obj, args.head_rings, args.head_depth, args.head_cap)
+        # 깎아낸 머리를 붙였으면 얼굴 면은 그때 세어 둔 값이다.
+        face_polys = obj.get("holo_face_polys", len(obj.data.polygons))
+        if args.head or args.head_mesh:
+            if not args.head_mesh:
+                close_back(obj, args.head_rings, args.head_depth, args.head_cap)
             bpy.context.view_layer.objects.active = obj
             bpy.ops.object.select_all(action="DESELECT")
             obj.select_set(True)
@@ -749,31 +1287,62 @@ def build_hologram(obj):
             # 머리 전체에 옅은 격자를 한 겹 두른다. 뒤통수에 선이 하나도
             # 없으면 부피가 안 읽혀서 방패처럼 보인다. 얼굴 쪽 마스크보다
             # 가늘고 옅게 둬야 "아바타 위에 마스크" 로 층이 진다.
-            head_wire = obj.copy()
-            head_wire.data = obj.data.copy()
-            head_wire.name = "holo_head_wire"
-            bpy.context.collection.objects.link(head_wire)
+            #
+            # 사진 색이 입혀진 실제 머리에는 필요 없다 — 색과 명암이 이미
+            # 부피를 말해 주는데 격자까지 얹으면 가발 망을 쓴 것처럼 보인다.
+            if not args.no_head_wire:
+                head_wire = obj.copy()
+                head_wire.data = obj.data.copy()
+                head_wire.name = "holo_head_wire"
+                bpy.context.collection.objects.link(head_wire)
 
-            # 뒤통수 면만 남긴다. 얼굴 쪽은 표면을 촘촘히 깔아 두었기 때문에
-            # 거기까지 격자를 두르면 얼굴이 그물로 덮인다 — 마스크 선이
-            # 따로 있으므로 여기서는 두개골 구조만 보여 주면 된다.
-            bm = bmesh.new()
-            bm.from_mesh(head_wire.data)
-            bm.faces.ensure_lookup_table()
-            front = [f for f in bm.faces if f.index < face_polys]
-            if front:
-                bmesh.ops.delete(bm, geom=front, context="FACES")
-            bm.to_mesh(head_wire.data)
-            bm.free()
-            head_wire.data.update()
-            hw = head_wire.modifiers.new("wireframe", "WIREFRAME")
-            hw.thickness = args.thickness * args.head_wire_scale
-            hw.use_replace = True
-            hw.use_even_offset = True
-            head_wire.data.materials.clear()
-            head_wire.data.materials.append(emission_material(
-                "holo_head_wire_mat", hex_to_linear(args.head_wire), args.emit))
-            head_wire.parent = rig
+                # 뒤통수 면만 남긴다. 얼굴 쪽은 표면을 촘촘히 깔아 두었기
+                # 때문에 거기까지 격자를 두르면 얼굴이 그물로 덮인다 —
+                # 마스크 선이 따로 있으므로 여기서는 두개골 구조만 보여 준다.
+                bm = bmesh.new()
+                bm.from_mesh(head_wire.data)
+                bm.faces.ensure_lookup_table()
+                front = [f for f in bm.faces if f.index < face_polys]
+                if front:
+                    bmesh.ops.delete(bm, geom=front, context="FACES")
+                bm.to_mesh(head_wire.data)
+                bm.free()
+                head_wire.data.update()
+                # 격자를 두르기 **전에** 줄인다. 두른 뒤에 줄이면 이미
+                # 선이 된 것을 뭉개서 마디가 끊긴다.
+                if args.head_wire_blocks > 0 or (
+                        0 < args.head_wire_faces < len(head_wire.data.polygons)):
+                    face_pts = [obj.data.vertices[i].co
+                                for p in obj.data.polygons[:face_polys]
+                                for i in p.vertices]
+                    box = None
+                    if face_pts:
+                        xs = [c.x for c in face_pts]
+                        zs = [c.z for c in face_pts]
+                        ys = [c.y for c in face_pts]
+                        box = (min(xs), max(xs), min(zs), max(zs),
+                               sum(ys) / len(ys))
+                    if args.head_wire_blocks > 0:
+                        blockify_wire(head_wire, args.head_wire_blocks,
+                                      args.head_wire_lift, box)
+                    else:
+                        reduce_wire(head_wire, args.head_wire_faces,
+                                    args.head_wire_lift, box)
+                    # 줄인 격자는 **관**으로 씌운다 (얼굴 격자와 같은 방법).
+                    head_wire = tube_edges(
+                        head_wire, args.thickness * args.head_wire_scale)
+                else:
+                    # 안 줄였으면 면이 수만 장이라 관으로 만들 수 없다.
+                    hw = head_wire.modifiers.new("wireframe", "WIREFRAME")
+                    hw.thickness = args.thickness * args.head_wire_scale
+                    hw.use_replace = True
+                    hw.use_even_offset = True
+                head_wire.data.materials.clear()
+                head_wire.data.materials.append(emission_material(
+                    "holo_head_wire_mat", hex_to_linear(args.head_wire),
+                    args.emit))
+                head_wire.name = "holo_head_wire"
+                head_wire.parent = rig
         obj.name = "holo_shell"
         obj.data.materials.clear()
         if args.texture:
@@ -781,7 +1350,15 @@ def build_hologram(obj):
             # 사진을 그대로 입히면 이미지 한 귀퉁이가 늘어붙는다.
             obj.data.materials.append(
                 textured_material("holo_face_mat", args.texture))
-            obj.data.materials.append(shell_material("holo_back_mat"))
+            if args.head_texture:
+                # 머리도 사진이다. 얼굴과 같은 UV 층을 쓰고 그림만 다르다.
+                obj.data.materials.append(
+                    textured_material("holo_back_mat", args.head_texture,
+                                      fade=args.head_fade))
+            elif obj.data.color_attributes.get("head"):
+                obj.data.materials.append(head_color_material("holo_back_mat"))
+            else:
+                obj.data.materials.append(shell_material("holo_back_mat"))
             for poly in obj.data.polygons:
                 poly.material_index = 0 if poly.index < face_polys else 1
             print(f"[holo] 얼굴에 사진을 입힘 (면 {face_polys})")
@@ -823,7 +1400,7 @@ def scan_edge_on(z):
 
 # 앞에 그릴 것 / 뒤에 남길 것. `--lines-front` 가 이 둘을 따로 렌더한다.
 _FRONT = ("holo_wire", "holo_contour", "holo_dot_emitter", "holo_dot")
-_BACK = ("holo_shell", "holo_head_wire", "holo_scan")
+_BACK = ("holo_shell", "holo_head_wire", "holo_scan", "holo_scan_halo")
 
 
 def only(names):
@@ -844,6 +1421,40 @@ def parse_zones(spec):
         name, _, idx = part.partition("=")
         out.append((name.strip(), int(idx)))
     return out
+
+
+def zone_fans(obj, zones):
+    """부위마다 **그 자리를 덮는 삼각형 무리**를 고른다.
+
+    반지름을 재서 자르지 않는다 — 값 하나로 모든 부위에 맞출 수가 없다.
+    부위 정점에서 가장 가까운 격자 꼭짓점을 찾고, **그 꼭짓점을 쓰는 삼각형**
+    을 전부 가져온다. 자연히 이어진 한 덩어리가 나온다.
+
+    (격자 정점 목록, 부위이름 → 삼각형(목록 안 번호) 목록) 을 돌려준다.
+    """
+    flat = list(obj.get("holo_line_faces") or [])
+    tris = [flat[i:i + 3] for i in range(0, len(flat) - 2, 3)]
+    if not tris:
+        return [], {}
+
+    verts = obj.data.vertices
+    used = sorted({i for t in tris for i in t if i < len(verts)})
+    slot = {v: k for k, v in enumerate(used)}
+
+    out = {}
+    for name, idx in zones:
+        if idx >= len(verts):
+            continue
+        here = verts[idx].co
+        near = min(used, key=lambda v: (verts[v].co - here).length)
+        fan = [t for t in tris if near in t and all(i in slot for i in t)]
+        # 한두 장뿐이면 너무 작아서 안 보인다. 한 겹 넓힌다.
+        if len(fan) < 4:
+            ring = {i for t in fan for i in t}
+            fan = [t for t in tris
+                   if ring & set(t) and all(i in slot for i in t)]
+        out[name] = [[slot[i] for i in t] for t in fan]
+    return used, out
 
 
 def zone_screen(scene, obj, indices):
@@ -868,7 +1479,7 @@ def zone_screen(scene, obj, indices):
 
 
 def render_turntable(scene, rig, frames, out_dir, scan=None, zones=None,
-                     shell=None):
+                     shell=None, fan_verts=None, fans=None):
     """한 바퀴를 frames 장으로 쪼개 한 장씩 렌더한다.
 
     키프레임을 쓰지 않고 매 장마다 직접 각도를 넣는다. Blender 4.4 에서
@@ -880,7 +1491,9 @@ def render_turntable(scene, rig, frames, out_dir, scan=None, zones=None,
     """
     sweep = math.radians(args.sweep)
     tracks = []
+    mesh_tracks = []
     indices = [i for _, i in (zones or [])]
+    fan_verts = fan_verts or []
     for frame in range(frames):
         phase = 2 * math.pi * frame / frames
 
@@ -906,6 +1519,8 @@ def render_turntable(scene, rig, frames, out_dir, scan=None, zones=None,
             # 안 하면 매 프레임 이전 각도의 위치를 재게 된다.
             bpy.context.view_layer.update()
             tracks.append(zone_screen(scene, shell, indices))
+            if fan_verts:
+                mesh_tracks.append(zone_screen(scene, shell, fan_verts))
 
         if args.lines_front:
             # 두 번 렌더한다. 선을 얼굴보다 조금 띄우는 것만으로는 볼·턱에서
@@ -927,8 +1542,16 @@ def render_turntable(scene, rig, frames, out_dir, scan=None, zones=None,
         path = os.path.join(
             os.path.dirname(os.path.normpath(out_dir)), "zones.json")
         with open(path, "w", encoding="utf-8") as fp:
-            json.dump({"names": [n for n, _ in zones], "frames": tracks}, fp)
-        print(f"[holo] 부위 {len(zones)}개의 프레임별 위치 저장")
+            json.dump({
+                "names": [n for n, _ in zones],
+                "frames": tracks,
+                # 격자 꼭짓점의 프레임별 위치와, 부위마다 그 위를 덮는 삼각형.
+                "mesh": mesh_tracks,
+                "tris": fans or {},
+            }, fp)
+        count = sum(len(v) for v in (fans or {}).values())
+        print(f"[holo] 부위 {len(zones)}개 / 격자 정점 {len(fan_verts)}개 / "
+              f"삼각형 {count}장 저장")
 
 
 # ---------------------------------------------------------------- 렌더 설정
@@ -995,13 +1618,18 @@ def main():
     print(f"[holo] {args.frames}장 렌더 -> {args.out}")
     zones = parse_zones(args.zones)
     shell = bpy.data.objects.get("holo_shell")
-    render_turntable(scene, rig, args.frames, args.out, scan, zones, shell)
+    fan_verts, fans = ([], {})
+    if zones and shell is not None:
+        fan_verts, fans = zone_fans(shell, zones)
+    render_turntable(scene, rig, args.frames, args.out, scan, zones, shell,
+                     fan_verts, fans)
 
     # 정렬 측정용 한 장. 2D 마스크와 **같은 범위**만 남겨야 한다 —
     # 머리(두개골)까지 재면 그 넓이에 맞추느라 아바타가 확 작아진다.
     # 스캔면도 머리보다 넓어서 그대로 재면 화면 전체가 잡힌다.
     hidden = [o for o in bpy.data.objects
-              if o.name in ("holo_shell", "holo_head_wire", "holo_scan")]
+              if o.name in ("holo_shell", "holo_head_wire", "holo_scan",
+                         "holo_scan_halo")]
     if hidden:
         for o in hidden:
             o.hide_render = True

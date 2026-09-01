@@ -65,19 +65,23 @@ class EntryScreen extends StatelessWidget {
   }
 }
 
-/// 서비스 준비가 끝나기 전에 잠깐 보이는 진입 화면 배경.
-/// 인트로를 일찍 건너뛰었을 때만 나온다 — 버튼은 아직 누를 수 없다.
+/// 인트로와 카메라 사이에 한두 프레임 스쳐 가는 자리.
+///
+/// **검은 화면이다.** 코랄 표지(CoralBackdrop)를 썼더니 인트로에서 터치하는
+/// 순간 표지가 번쩍 스치고 카메라가 떴다 — 어두운 인트로 영상과 카메라
+/// 사이에는 어두운 색이 껴야 화면이 한 번에 이어져 보인다.
 class EntryScreenPlaceholder extends StatelessWidget {
   const EntryScreenPlaceholder({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return CoralBackdrop(
+    return ColoredBox(
+      color: Colors.black,
       child: Center(
         child: Semantics(
           liveRegion: true,
           label: '준비하고 있어요. 잠시만 기다려 주세요.',
-          child: SizedBox.shrink(),
+          child: const SizedBox.shrink(),
         ),
       ),
     );

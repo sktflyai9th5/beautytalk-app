@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../ml/cosmetic_classifier.dart';
 import '../../app_state.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/coral.dart';
@@ -17,11 +18,6 @@ class CosmeticTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final step = switch (state.cosmeticStage) {
-      CosmeticStage.capture => 0,
-      CosmeticStage.analyzing => 1,
-      CosmeticStage.result => 2,
-    };
     return Column(
       children: [
         // 화면 이름은 스크린리더만 읽는다. 눈으로 볼 사용자에게는
@@ -33,12 +29,17 @@ class CosmeticTab extends StatelessWidget {
             CosmeticStage.result => '제품 정보',
           },
           showTitle: false,
-          onBack: state.cosmeticStage == CosmeticStage.result
-              ? state.retakeCosmetic
-              : null,
+          onMenu: () => state.goTab(AppTab.settings),
+          onHome: state.resetToStart,
+          // 뒤로 가기는 **언제나 있다.** 단계 중간이면 앞 단계로, 첫
+          // 단계면 처음(화장품 촬영)으로 돌아간다 — 화면마다 있다 없다
+          // 하면 "여기선 왜 없지" 를 매번 겪는다.
+          onBack: state.cosmeticStage == CosmeticStage.capture
+              ? state.resetToStart
+              : state.retakeCosmetic,
         ),
-        const SizedBox(height: 12),
-        Gutter(child: StepIndicator(steps: steps, current: step)),
+        // 단계 표시기(1·2·3)는 두지 않는다 — 지금 어디인지는 화면 제목과
+        // 음성이 이미 말하고, 눈금이 위쪽 자리를 크게 먹었다.
         const SizedBox(height: 8),
         Expanded(
           child: AnimatedSwitcher(
@@ -67,16 +68,9 @@ class _Capture extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // 촬영 안내는 글자로 쓰지 않는다 — 앞이 보이지 않는 사용자에게는
-        // 읽히지 않고, 카메라를 가리기만 한다. 같은 내용을 TTS 로 말한다
-        // (AppState._announceCurrent).
-        // 카메라와 안내선은 메인 셸이 화면 전체에 깔아 준다.
+        // 카메라와 조준선은 메인 셸이 화면 전체에 깔아 준다.
         // 여기서는 그만큼 자리만 비워 둔다.
         const Expanded(child: SizedBox.expand()),
-        const SizedBox(height: 8),
-        // 플래시는 두지 않는다 — 눈으로 밝기를 확인할 수 없는 사용자에게
-        // 켜고 끄는 판단을 맡기는 버튼이라 쓸모가 없다.
-        Center(child: ShutterButton(onTap: state.captureAndAnalyze)),
       ],
     );
   }
@@ -94,30 +88,18 @@ class _Scanning extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // 사진이 화면을 다 채운다. 글자는 두지 않고 **음성과 스크린리더로만**
+        // 알린다 — 화면을 보는 사람에게는 훑고 지나가는 스캔 선이 이미
+        // "분석 중" 을 말하고, 글자는 사진을 그만큼 가릴 뿐이다.
         Expanded(
-          child: Gutter(
-            child: Semantics(
-              liveRegion: true,
-              label: line,
-              child: ExcludeSemantics(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(AppShape.cardRadius),
-                  child: ScanningPhoto(path: state.lastShotPath),
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Gutter(
-          child: SizedBox(
-            width: double.infinity,
+          child: Semantics(
+            liveRegion: true,
+            label: line,
             child: ExcludeSemantics(
-              child: Text(line, style: AppText.h1.copyWith(color: AppColors.brand)),
+              child: ScanningPhoto(path: state.lastShotPath),
             ),
           ),
         ),
-        const SizedBox(height: 20),
       ],
     );
   }
@@ -136,50 +118,126 @@ class _Result extends StatelessWidget {
     if (p == null) return const SizedBox.shrink();
     return Column(
       children: [
-        const Gutter(
-          child: SizedBox(
-            width: double.infinity,
-            child: Text('제품을 찾았어요.', style: AppText.h1),
-          ),
-        ),
-        const SizedBox(height: 14),
+        // 「제품을 찾았어요」 같은 글자는 두지 않는다 — 음성이 이미 그렇게
+        // 말했고, 그 자리는 사진이 쓰는 편이 낫다. 제품 이름은 아래 시트에 있다.
         Expanded(
-          child: SingleChildScrollView(
-            child: Gutter(
-              // "이건 ~예요" 는 화면에 안 쓴다 — 음성이 이미 그렇게 말한다.
-              // 화면에는 이름과, 어디를 보고 판단했는지(박스)만 남긴다.
-              child: ResultCard(
-                badge: const Icon(Icons.check_rounded),
-                title: p.product.name,
-                action: p.product.usage.isEmpty ? null : p.product.usage,
-                top: _Shot(path: state.lastShotPath, box: p.box),
-              ),
+          flex: 3,
+          // 사진이 그 자리를 남김없이 채운다 — 뒤 배경이 비치면 화면이
+          // 두 겹으로 보인다.
+          child: SizedBox.expand(
+            // **찍은 사진 그대로다.** 미리 준비한 대표 사진을 대신 띄우면
+            // 화면과 손에 든 물건이 달라서, 곁에서 보는 사람이 "이게 그거
+            // 맞나" 를 되묻게 된다.
+            child: ClipRect(
+              child: _Shot(path: state.lastShotPath, box: p.box),
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        Gutter(
-          child: Row(
+        const SizedBox(height: 12),
+        _ProductSheet(state: state, p: p),
+      ],
+    );
+  }
+}
+
+/// 제품 시트. 분류 · 이름 · 사용법 한 줄 · 버튼 두 개.
+class _ProductSheet extends StatelessWidget {
+  const _ProductSheet({required this.state, required this.p});
+
+  final AppState state;
+  final CosmeticPrediction p;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        boxShadow: [
+          BoxShadow(
+              color: AppColors.cardShadow, blurRadius: 30, offset: Offset(0, -8)),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppShape.gutter, 10, AppShape.gutter, 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: CoralButton(
-                  label: '다시 들려주기',
-                  filled: false,
-                  onTap: state.speakProduct,
+              const Center(
+                child: ExcludeSemantics(
+                  child: SizedBox(
+                    width: 44,
+                    height: 4,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AppColors.track,
+                        borderRadius: BorderRadius.all(Radius.circular(2)),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: CoralButton(
-                  label: '다시 촬영하기',
-                  onTap: state.retakeCosmetic,
+              const SizedBox(height: 14),
+              // 분류 — 이름 위에 작게. 음성은 이미 "이건 ~예요" 라고 말했다.
+              Text(p.label,
+                  style: AppText.label
+                      .copyWith(fontSize: 13, color: AppColors.inkSoft)),
+              const SizedBox(height: 2),
+              Semantics(
+                header: true,
+                child: Text(p.product.name, style: AppText.h1),
+              ),
+              if (p.product.usage.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('사용량',
+                        style: AppText.label.copyWith(
+                            fontSize: 15, color: AppColors.inkSoft)),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        p.product.usage,
+                        textAlign: TextAlign.right,
+                        style: AppText.label
+                            .copyWith(fontSize: 15, color: AppColors.ink),
+                      ),
+                    ),
+                  ],
                 ),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: CoralButton(
+                      label: '자세히 듣기',
+                      icon: Icons.volume_up_rounded,
+                      soft: true,
+                      onTap: state.speakProduct,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: CoralButton(
+                      label: '다시 촬영',
+                      icon: Icons.refresh_rounded,
+                      beige: true,
+                      onTap: state.retakeCosmetic,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-      ],
+      ),
     );
   }
 }
@@ -195,13 +253,12 @@ class _Shot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = path;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: SizedBox(
-        width: double.infinity,
-        height: 180,
+    // 높이를 정하지 않는다 — 부모가 준 자리를 그대로 채운다. 180 으로
+    // 묶어 두면 결과 화면에서 사진 위아래로 배경이 드러난다.
+    return ClipRect(
+      child: SizedBox.expand(
         child: DecoratedBox(
-          decoration: const BoxDecoration(gradient: AppColors.blobPink),
+          decoration: const BoxDecoration(color: AppColors.surface),
           child: p == null
               ? const SizedBox.expand()
               : ShotWithBoxes(

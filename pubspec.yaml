@@ -44,6 +44,8 @@ dependencies:
   http: ^1.6.0
   path_provider: ^2.1.6
   audioplayers: ^6.8.1
+  # 인트로 영상 재생. 알파가 없는 일반 mp4 라 표준 플레이어로 충분하다.
+  video_player: ^2.10.0
 
 dev_dependencies:
   flutter_test:
@@ -70,12 +72,19 @@ flutter:
   assets:
     - assets/models/
     - assets/images/
+    # 클래스별 제품 대표 사진. 넣는 방법은 그 폴더의 README.md 참고 —
+    # 없는 클래스는 찍은 사진으로 자동으로 되돌아간다.
+    - assets/images/products/
     # 분석 연출용 홀로그램 루프. 알파가 있는 애니메이션 WebP 라
     # Image.asset 만으로 재생된다 — 영상 플러그인이 필요 없다.
     # 굽는 방법은 tools/hologram/README.md 참고.
     - assets/hologram/
     # 하위 폴더는 따로 적어야 한다 — 에셋 선언은 재귀하지 않는다.
     - assets/hologram/sfx/
+    # 진입 인트로 영상
+    - assets/video/
+    # 인트로 안내 음성 (기기 TTS 가 아니라 구워 둔 파일)
+    - assets/audio/
 
   # 피그마 디자인의 영문 타이틀은 Playfair Display 다.
   # 한글은 기기 기본 본문 글꼴(Noto Sans CJK KR)을 그대로 쓴다 —

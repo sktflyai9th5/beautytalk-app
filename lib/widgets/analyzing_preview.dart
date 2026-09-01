@@ -95,3 +95,54 @@ class AnalyzingPreview extends StatelessWidget {
     );
   }
 }
+
+/// 결과 화면을 기기 없이 세워 보기 위한 껍데기.
+///
+/// 실제 탭(`makeup_tab.dart` 의 `_Result`)과 같은 부품을 같은 순서로 쓴다.
+/// 다른 점은 항목을 [AppState] 가 아니라 바깥에서 넣어 준다는 것 하나다.
+///
+/// 영상에 결과까지 담으려고 만들었다. 분석만 담으면 연출이 어디로 이어지는지가
+/// 안 보인다 — 실제로 "결과 부분이 안 나온다" 는 얘기를 들었다.
+class ResultPreview extends StatelessWidget {
+  const ResultPreview({
+    super.key,
+    required this.findings,
+  });
+
+  /// (부위, 상태 문장, 할 일). 실제 앱에서는 서버가 준 값이 그대로 들어온다.
+  final List<(String, String, String)> findings;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(gradient: AppColors.screenBackdrop),
+      child: SafeArea(
+        child: Column(
+          children: [
+            const ScreenHeader(title: '메이크업 분석', showTitle: false),
+            const SizedBox(height: 12),
+            const Gutter(
+                child: StepIndicator(steps: AnalyzingPreview.steps, current: 3)),
+            const SizedBox(height: 12),
+            const Gutter(
+              child: SizedBox(
+                width: double.infinity,
+                child: Text('메이크업 분석 완료!', style: AppText.h1),
+              ),
+            ),
+            Expanded(
+              child: Gutter(
+                // 분석 중 화면과 같은 구성이다 — 큰 아바타 아래 큰 문장 하나.
+                child: ResultShowcase(
+                  regions: [findings.first.$1],
+                  sentence: findings.first.$2,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}

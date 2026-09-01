@@ -64,6 +64,13 @@ migrate_working_dir/
 .DS_Store
 Thumbs.db
 
+# 인물별로 구운 홀로그램 원판 (face_hologram_<이름>.*).
+# 앱이 읽는 것은 face_hologram.* / face_hologram_result.* 뿐이고, 이것들은
+# 그 판을 만들 때 나온 중간 산출물이다 — 사람마다 한 벌씩 쌓여 용량만 늘고
+# 실제 인물의 얼굴이 이름과 함께 남는다. 굽는 법은 tools/hologram/README.md.
+assets/hologram/face_hologram_jinhee*
+assets/hologram/face_hologram_suzy*
+
 # 실제 인물이 찍힌 사진 — 저장소에 올리지 않는다.
 # 연출 프리뷰(lib/preview_main.dart)와 홀로그램 테스트가 이 파일을 쓴다.
 # 클론한 뒤 직접 얼굴 사진을 넣고 tools/hologram 으로 격자를 다시 뽑을 것.

@@ -1,106 +1,116 @@
 import 'package:flutter/material.dart';
 
-/// 피그마 "Codex Draft · Coral Soft · 원본 보존" (node 368:2) 토큰.
+/// 피그마 초록 개편안(파일 sqoJjZjQQQz3J9QDj2BBMZ, Page 1) 토큰.
+///
+/// 코랄에서 초록으로 갈아 끼웠다. **토큰 이름은 그대로 두고 값만 바꿨다** —
+/// 화면 코드에 hex 가 없으므로 이 파일만으로 앱 전체 색이 넘어가고,
+/// 위젯 구조와 동작에는 손을 대지 않는다.
 ///
 /// 값은 눈으로 옮긴 것이 아니라 Figma REST 로 파일에서 직접 뽑았다.
 /// 색을 바꿀 일이 있으면 여기만 고치면 된다 — 화면 코드에는 hex 를 두지 않는다.
 class AppColors {
   // ── 배경 ──────────────────────────────────────────────
   /// 진입 화면 바탕 (#FFFDFC → #FEF2F0)
-  static const canvasTop = Color(0xFFFFFDFC);
-  static const canvasMid = Color(0xFFFFF9F7);
-  static const canvasBottom = Color(0xFFFEF1EF);
-  static const canvasEntryBottom = Color(0xFFFEF2F0);
+  static const canvasTop = Color(0xFFFDFEFD);
+  static const canvasMid = Color(0xFFF7FAF8);
+  static const canvasBottom = Color(0xFFF0F3F1);
+  static const canvasEntryBottom = Color(0xFFF0F3F1);
 
   /// 카드·시트 바탕
   static const surface = Color(0xFFFFFFFF);
 
   /// 촬영·분석 면 (#FDF4F1)
-  static const surfaceSoft = Color(0xFFFDF4F1);
+  static const surfaceSoft = Color(0xFFF4F8F5);
 
   /// 확인 중 면 · 질문 카드 (#FCF0ED)
-  static const surfaceScan = Color(0xFFFCF0ED);
+  static const surfaceScan = Color(0xFFEEF3EF);
 
   /// 결과 카드 (#FCF2F2)
-  static const surfaceCard = Color(0xFFFCF2F2);
+  static const surfaceCard = Color(0xFFF4F8F5);
 
   /// 선택된 탭 알약 (#FFE9ED)
-  static const surfaceTint = Color(0xFFFFE9ED);
+  static const surfaceTint = Color(0xFFEEF3EF);
 
   /// 추천 질문 알약 (#FFF5F4)
-  static const surfaceSuggest = Color(0xFFFFF5F4);
+  static const surfaceSuggest = Color(0xFFF4F8F5);
 
   /// 행동 칩 (#FFE3E0)
-  static const surfaceChip = Color(0xFFFFE3E0);
+  static const surfaceChip = Color(0xFFE3EFE7);
 
   /// 진행률 트랙 (#FAE5E3)
-  static const track = Color(0xFFFAE5E3);
+  static const track = Color(0xFFCFDAD4);
+
+  /// 하단 탭바 바닥 — 흰색 한 장.
+  static const tabBarBase = surface;
+
+  /// 하단 탭바 — 선택되지 않은 탭의 점
+  static const tabDotIdle = Color(0xFFBFC8C2);
 
   // ── 글자 ──────────────────────────────────────────────
   /// 제목. 거의 검정이지만 붉은 기가 돈다 (#301A1C)
-  static const ink = Color(0xFF301A1C);
+  static const ink = Color(0xFF1A1A1A);
 
   /// 본문·부제 (#6B5254)
-  static const inkBody = Color(0xFF6B5254);
+  static const inkBody = Color(0xFF54655C);
 
   /// 탭 라벨·비활성 (#755E61)
-  static const inkSoft = Color(0xFF755E61);
+  static const inkSoft = Color(0xFF5E6B64);
 
   /// 비활성 단계 숫자 (#7A6062)
-  static const inkMuted = Color(0xFF7A6062);
+  static const inkMuted = Color(0xFF5E6B64);
 
   /// 추천 질문 글자 (#6E363B)
-  static const inkQuestion = Color(0xFF6E363B);
+  static const inkQuestion = Color(0xFF2E6B45);
 
   // ── 브랜드 ────────────────────────────────────────────
   /// 강조 텍스트·선택된 탭 (#B02426)
-  static const brand = Color(0xFFB02426);
+  static const brand = Color(0xFF2E6B45);
 
   /// 활성 단계 라벨·눈썹 문구 (#A82426)
-  static const brandLabel = Color(0xFFA32226);
+  static const brandLabel = Color(0xFF2E6B45);
 
   /// 아주 작은 눈썹 문구 (#A82426)
-  static const brandEyebrow = Color(0xFFA82426);
+  static const brandEyebrow = Color(0xFF2E6B45);
 
   /// 셔터 라벨·아이콘 (#6B0F1E)
-  static const brandDeep = Color(0xFF6B0F1E);
+  static const brandDeep = Color(0xFF1F4C31);
 
   /// 채움 버튼 글자 (#3A0A14)
-  static const brandDark = Color(0xFF3A0A14);
+  static const brandDark = Color(0xFFFFFFFF);
 
   /// 진입 화면 BEAUTY/TALK (#7A2A35), 인트로는 #471417
-  static const brandSerif = Color(0xFF7A2A35);
-  static const brandSerifDeep = Color(0xFF471417);
+  static const brandSerif = Color(0xFF2E6B45);
+  static const brandSerifDeep = Color(0xFF1F4C31);
 
   /// 행동 칩 글자 (#8E2B32)
-  static const brandChip = Color(0xFF8E2B32);
+  static const brandChip = Color(0xFF2E6B45);
 
   /// 스캔 선 (#B22629)
-  static const scanLine = Color(0xFFB22629);
+  static const scanLine = Color(0xFF42805A);
 
   /// 채움 버튼·셔터
-  static const coral = Color(0xFFFF8DA1);
-  static const coralDeep = Color(0xFFFF7A92);
-  static const coralLight = Color(0xFFFFA5B4);
+  static const coral = Color(0xFF2E6B45);
+  static const coralDeep = Color(0xFF42805A);
+  static const coralLight = Color(0xFF9AC489);
 
   // ── 테두리 ────────────────────────────────────────────
   /// 단계 연결선 (#E7D8D8)
-  static const border = Color(0xFFE7D8D8);
+  static const border = Color(0xFFDBE4DE);
 
   /// 버튼 외곽선 (#E1ABB8)
-  static const outline = Color(0xFFE1ABB8);
+  static const outline = Color(0xFFC5D2CA);
 
   /// 촬영 면 외곽선 (#CC7A75 30%)
-  static const surfaceEdge = Color(0x4DCC7A75);
+  static const surfaceEdge = Color(0x4D8FA897);
 
   /// 카드 외곽선 (#D98C87 28%)
-  static const cardEdge = Color(0x47D98C87);
+  static const cardEdge = Color(0xFFE3EBE6);
 
   /// 비활성 단계 원 테두리 (#BF7370 35%)
-  static const stepEdge = Color(0x59BF7370);
+  static const stepEdge = Color(0xFFB6C3BB);
 
   /// 칩·추천 질문 테두리 (#B22629 22%)
-  static const chipEdge = Color(0x38B22629);
+  static const chipEdge = Color(0x382E6B45);
 
   // ── 그라데이션 ────────────────────────────────────────
   /// 진입 화면 배경 (#FFFDFC → #FEF2F0)
@@ -119,45 +129,81 @@ class AppColors {
 
   /// 진입 화면의 흐릿한 원 3개
   static const blobDeep =
-      LinearGradient(colors: [Color(0xFF8E1A22), Color(0xFFC93034)]);
+      LinearGradient(colors: [Color(0xFF2E6B45), Color(0xFF42805A)]);
   static const blobCoral =
-      LinearGradient(colors: [Color(0xFFD64649), Color(0xFFF98E83)]);
+      LinearGradient(colors: [Color(0xFF42805A), Color(0xFF9AC489)]);
   static const blobPink =
-      LinearGradient(colors: [Color(0xFFFBAFA8), Color(0xFFFFDDD9)]);
+      LinearGradient(colors: [Color(0xFF9AC489), Color(0xFFDDEBE1)]);
 
   /// 활성 단계 원 · 결과 카드 번호 배지
   static const stepActive =
-      LinearGradient(colors: [Color(0xFF8E1A22), Color(0xFFC93034)]);
+      LinearGradient(colors: [Color(0xFF2E6B45), Color(0xFF42805A)]);
   static const badge =
-      LinearGradient(colors: [Color(0xFFFF7A92), Color(0xFFC93034)]);
+      LinearGradient(colors: [Color(0xFF42805A), Color(0xFF42805A)]);
 
   /// 셔터·음성 버튼 (#FFA5B4 → #FF7A92)
+  /// 셔터 원의 색. 하단 가운데에 놓이는 단 하나의 색면이라 여기만 색을 쓴다.
+  ///
+  /// 위에서 아래로 곧게 흐르는 그라데이션은 색 견본처럼 보인다. 빛이
+  /// 한쪽에서 들어온 것처럼 **중심을 비껴 놓고**, 색이 바뀌는 간격도
+  /// 고르지 않게 두면 유리구슬처럼 읽힌다.
+  /// 위는 초록, 아래는 베이지. **경계가 직선이 아니라 곡선**이다 —
+  /// 원 위쪽 바깥에 중심을 둔 방사형이라 색이 갈리는 자리가 아래로
+  /// 볼록한 호를 그린다. 색은 두 가지뿐이라 눈에 부담이 없다.
+  /// 대각선으로 부드럽게 넘어가는 원. 왼쪽 아래가 초록, 오른쪽 위가 베이지다.
+  ///
+  /// 경계를 뚜렷하게 가르지 않는다 — 색이 어디서 바뀌는지 짚을 수 없을 만큼
+  /// 넓게 섞이고, 가운데를 살짝 흐린 중간색이 지나가서 유리구슬처럼 보인다.
   static const shutter = LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-    colors: [coralLight, coralDeep],
+    begin: Alignment(-0.8, 1.0),
+    end: Alignment(0.9, -0.9),
+    colors: [
+      Color(0xFF86D3B0),
+      Color(0xFFA9D9C2),
+      Color(0xFFD5DACB),
+      Color(0xFFEBD9BB),
+      Color(0xFFF0E0C4),
+    ],
+    stops: [0.0, 0.28, 0.52, 0.78, 1.0],
   );
 
   /// 진행률 채움 (#8E1A22 → #D64649)
   static const progress =
-      LinearGradient(colors: [Color(0xFF8E1A22), Color(0xFFD64649)]);
+      LinearGradient(colors: [Color(0xFF2E6B45), Color(0xFF42805A)]);
+
+  /// 분석 진행 막대 — 초록에서 베이지로 흐른다. 셔터와 같은 두 색이라
+  /// 화면이 한 벌로 읽힌다.
+  static const scanProgress = LinearGradient(
+    colors: [Color(0xFF2E6B45), Color(0xFF7FCBA4), Color(0xFFE8D5B5)],
+    stops: [0.0, 0.5, 1.0],
+  );
+
+  /// 하단 탭바 바탕 (피그마 1:1496) — 흰 판이 아니라 투명 → 흰색 세로 그라데이션.
+  /// 위 25% 안에서 흰색이 다 차오르고 그 아래는 완전한 흰색이다.
+  /// 탭바 바탕. 그라데이션을 걷어내고 나무색 한 장으로 둔다 —
+  /// 반투명 띠는 카메라가 비치는 색에 따라 탭 글자 대비가 들쭉날쭉했다.
+  static const tabBarVeil = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [surface, surface],
+  );
 
   /// 카운트다운 화면을 덮는 어둠 (#5C0F1C 42% → #380A14 80%)
   static const dim = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
-    colors: [Color(0x6B5C0F1C), Color(0x9E4D0D1A), Color(0xCC380A14)],
+    colors: [Color(0x6B1B2B21), Color(0x9E14211A), Color(0xCC0E1712)],
   );
 
   /// 촬영 면 안쪽 비네트 (#59141F 0% → 20%)
   static const vignette = RadialGradient(
     radius: 0.85,
-    colors: [Color(0x0059141F), Color(0x0059141F), Color(0x3359141F)],
+    colors: [Color(0x00121A15), Color(0x00121A15), Color(0x33121A15)],
     stops: [0.0, 0.55, 1.0],
   );
 
   /// 카드 그림자 (아주 옅은 코랄)
-  static const cardShadow = Color(0x14B02426);
+  static const cardShadow = Color(0x142E6B45);
 }
 
 /// 타이포. 피그마는 Playfair Display(영문 타이틀) + Noto Sans KR(본문)을 쓴다.
@@ -235,7 +281,7 @@ class AppText {
     fontSize: 17,
     height: 27.2 / 17,
     fontWeight: FontWeight.w400,
-    color: Color(0xFF593D40),
+    color: Color(0xFF54655C),
   );
 
   /// 버튼 글자 18px

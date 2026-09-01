@@ -57,6 +57,12 @@ zones_path = os.path.join(args.assets, "face_hologram_zones.json")
 track = (json.load(open(zones_path, encoding="utf-8"))
          if os.path.exists(zones_path) else None)
 
+# 결과 화면용 판. **스캔 바가 없다** — 결과인데 막대가 계속 지나가면 아직
+# 분석 중인 것으로 보인다. 얼굴이 좌우로 도는 건 그대로 둔다.
+rzones_path = os.path.join(args.assets, "face_hologram_result_zones.json")
+rtrack = (json.load(open(rzones_path, encoding="utf-8"))
+          if os.path.exists(rzones_path) else None)
+
 sfx = {
     key: asset(f"sfx/{name}")
     for key, name in (
@@ -84,13 +90,16 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
     --brand: #B02426;
     --outline: #E1ABB8;
     --border: #E7D8D8;
-    /* 하늘색 세 단계. 흰 바탕에서 읽히도록 명도만 내려 잡았다. */
-    --mist: #FFD3DC;
-    --line: #E4607A;
-    --strong: #C93F5C;
-    --label: #B08A92;
-    --hair: #EFE2E5;
-    --shadow: rgba(201, 63, 92, 0.14);
+    /* 분석 화면은 무채색이다. 앱 본체(코랄)와 일부러 계열을 달리해서
+       계측 도구처럼 보이게 하고, 결과의 흰빛이 도드라지게 한다.
+       여기 값은 **글자용**이다 — 캔버스에 그리는 색은 JS 쪽에 따로 있다. */
+    --mist: #E3E6EA;
+    --line: #23292F;
+    --strong: #14181C;
+    --mark: #FFFFFF;
+    --label: #8B949C;
+    --hair: #E1E5E9;
+    --shadow: rgba(43, 51, 59, 0.13);
   }
   :root:not([data-theme="light"]) {
     @media (prefers-color-scheme: dark) {
@@ -174,7 +183,7 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   .card {
     position: relative; flex: 1; margin: 10px 16px 0;
     border-radius: 26px; overflow: hidden;
-    background: linear-gradient(180deg, #FFFFFF, #FEFBFB 55%, #FBF5F5);
+    background: linear-gradient(180deg, #FFFFFF, #FCFCFD 55%, #F6F7F8);
     display: flex; flex-direction: column; padding: 16px 16px 14px;
   }
   .stage { flex: 1; display: grid; place-items: center; min-height: 0; }
@@ -194,7 +203,7 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   .plate canvas#hud { pointer-events: none; }
   .halo {
     position: absolute; inset: 12%; border-radius: 50%; opacity: 0; pointer-events: none;
-    background: radial-gradient(circle, rgba(255,211,220,0.30) 0%, rgba(255,211,220,0.10) 60%, transparent 100%);
+    background: radial-gradient(circle, rgba(227,230,234,0.34) 0%, rgba(227,230,234,0.12) 60%, transparent 100%);
   }
 
   .telemetry {
@@ -210,36 +219,10 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
     background: var(--strong); margin-right: -3px; flex: none;
   }
 
-  /* 결과 면. 분석 카드와 같은 자리에 겹쳐 두고 서로 바꿔 낀다. */
-  .result { display: none; }
-  .phone.done .card:not(.result) { display: none; }
-  .phone.done .result { display: flex; flex-direction: column; }
-  .rtitle { font-size: 24px; font-weight: 700; color: var(--ink); line-height: 1.3; }
-  .rshot {
-    margin-top: 14px; border-radius: 20px; overflow: hidden;
-    height: 190px; background: var(--hair);
-  }
-  .rshot canvas { display: block; width: 100%; height: 100%; }
-  .rcards { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
-  .rcard {
-    text-align: left; border: 1px solid var(--border); border-radius: 16px;
-    background: var(--surface); padding: 13px 15px; cursor: pointer;
-    font: inherit; color: inherit;
-  }
-  .rcard.on { border-color: var(--strong); border-width: 2px; padding: 12px 14px; }
-  .rcard b { display: block; font-size: 13.5px; color: var(--ink); }
-  .rcard span { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-body); line-height: 1.5; }
-  .rcard i {
-    display: inline-block; margin-top: 7px; font-style: normal; font-size: 11px;
-    font-weight: 700; color: var(--strong);
-    background: rgba(201, 63, 92, 0.10); border-radius: 999px; padding: 3px 9px;
-  }
-  .rnote { margin: 12px 0 0; font-size: 11px; line-height: 1.6; color: var(--label); }
-
   .statusline { font-size: 26px; font-weight: 700; color: var(--ink); line-height: 1.4; }
   .track {
     margin-top: 12px; height: 4px; border-radius: 2px;
-    background: #F2E4E6; overflow: hidden;
+    background: #E7EBEF; overflow: hidden;
   }
   .fill {
     height: 100%; width: 0%; border-radius: 2px;
@@ -256,7 +239,7 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
 
   .idle {
     position: absolute; inset: 0; display: grid; place-items: center; align-content: center;
-    background: linear-gradient(180deg, #FFFFFF, #FBF5F5);
+    background: linear-gradient(180deg, #FFFFFF, #F6F7F8);
     gap: 12px; text-align: center; padding: 0 28px; z-index: 2;
   }
   .idle p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--label); }
@@ -271,29 +254,19 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   .result { display: none; }
   .card.done .analysing { display: none; }
   .card.done .result { display: flex; }
-  .result h2 { margin: 0 0 12px; font-size: 26px; font-weight: 700; color: var(--ink); }
-  .shot {
-    position: relative; height: 190px; border-radius: 20px; overflow: hidden;
-    flex: none; background: #EEE;
-  }
+  .result h2 { margin: 0 0 10px; font-size: 26px; font-weight: 700; color: var(--ink); }
+  /* 회색 면에 담지 않는다. 카드를 깔면 방금까지 보던 큰 아바타 화면과
+     딴 화면이 되고 문장도 작아진다 — 분석 중 화면과 같은 구성으로 둔다. */
+  .shot { position: relative; flex: 1; min-height: 0; }
   .shot canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .cards { flex: 1; min-height: 0; overflow-y: auto; margin-top: 14px;
-           display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
-  .rcard {
-    text-align: left; width: 100%; border-radius: 18px; padding: 14px 16px;
-    background: var(--surface); border: 1px solid var(--border);
-    cursor: pointer; font: inherit; color: inherit;
+  .rregion {
+    margin-top: 10px; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.4px; color: var(--strong);
   }
-  .rcard.on { border-color: var(--strong); border-width: 2px; padding: 13px 15px; }
-  .rcard b { display: block; font-size: 15px; color: var(--ink); }
-  .rcard span { display: block; margin-top: 4px; font-size: 12.5px;
-                line-height: 1.5; color: var(--ink-body); }
-  .rcard i {
-    display: inline-block; margin-top: 8px; padding: 5px 10px; border-radius: 10px;
-    background: rgba(201, 63, 92, 0.10); color: var(--strong);
-    font-size: 11.5px; font-style: normal; font-weight: 700;
-  }
-  .sample { margin: 10px 0 0; font-size: 11px; color: var(--label); }
+  /* 분석 중 화면의 상태 문장과 같은 크기다. 이 화면에서 사람이 읽는 유일한
+     문장이라 여기서 줄이면 안 된다. */
+  .rline { margin-top: 6px; font-size: 26px; font-weight: 700;
+           line-height: 1.4; color: var(--ink); }
 
   /* ---- 컨트롤 */
   .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -347,12 +320,11 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
     <div class="appbar"><div class="back">‹</div></div>
     <div class="steps" id="steps"></div>
     <div class="card" id="card">
-      <div class="result">
+      <div class="result" id="result">
         <h2>메이크업 분석 완료!</h2>
         <div class="shot"><canvas id="shot"></canvas></div>
-        <p class="sample">아래 문장은 화면 구성을 보여 주기 위한 <b>예시</b>입니다 —
-          실제로는 서버가 분석한 결과가 들어갑니다. 카드를 누르면 그 자리만 진해집니다.</p>
-        <div class="cards" id="cards"></div>
+        <div class="rregion" id="rregion"></div>
+        <div class="rline" id="rline"></div>
       </div>
       <div class="analysing">
       <div class="stage">
@@ -373,15 +345,6 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       </div>
     </div>
 
-    <!-- 분석이 끝나면 여기로 넘어간다. 앱도 서버 응답이 오면 곧바로
-         결과 단계로 바뀐다 — 사용자가 따로 누를 게 없다. -->
-    <div class="card result" id="result">
-      <div class="rtitle">메이크업 분석 완료!</div>
-      <div class="rshot"><canvas id="rshot"></canvas></div>
-      <div class="rcards" id="rcards"></div>
-      <p class="rnote">문장은 <b>보여 주기 위한 예시</b>입니다 — 실제로는 서버가
-        보낸 결과가 들어갑니다. 카드를 누르면 사진에서 그 자리만 짚어 줍니다.</p>
-    </div>
     <div class="cancel">취소하고 다시 촬영하기</div>
   </div>
 
@@ -424,6 +387,7 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   const SFX = __SFX__;
   const FIT = __FIT__;
   const TRACK = __TRACK__;
+  const RTRACK = __RTRACK__;
 
   // hologram_scan.dart 의 `_short` 와 같은 값. 한쪽만 고치면 어긋난다.
   // 사진을 훑는 앞 구간은 뺐다 — 분석이 언제 끝날지 모르는데 앞에 7초짜리
@@ -438,21 +402,40 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   const TELEM = [0.36, 0.54];
   // 아바타를 키우는 배율. 사진 구간이 있으면 1 이어야 한다 —
   // 사진 위 격자와 같은 자리·같은 크기여야 겹쳐 바뀔 때 튀지 않는다.
-  const ZOOM = PHOTO_STAGE ? 1 : 1.5;
-  const MIST = '255,211,220', LINE = '228,96,122', STRONG = '201,63,92';
-  const LABEL = '176,138,146', GLINT = '255,141,161';
+  // 아바타가 머리 전체를 갖게 된 뒤로 키우지 않는다 (hologram_scan.dart 와 같은 값).
+  const ZOOM = 1;
+  // 캔버스에 **그리는** 색. 밝기 순서가 코랄 때와 뒤집혀 있다 —
+  // 선·점은 흰색이고, 밝은 살결 위에서 읽히도록 **어두운 후광**을 깐다
+  // (hologram_scan.dart 의 ScanTone 과 같은 값이어야 앱과 같아 보인다).
+  const MIST = '227,230,234', LINE = '255,255,255', STRONG = '255,255,255';
+  const LABEL = '139,148,156', GLINT = '255,255,255', HALO = '20,26,32';
+  // 얼굴 밖(카드 위)에 그리는 것은 어두워야 보인다 — 조준 눈금, 모서리
+  // 갈고리, 라벨 글자, 결과에서 켠 흰 면 위의 삼각형 변 (ScanTone.frame).
+  const FRAME = '43,51,59';
+  // 결과에서 켜는 흰빛. 어두운 격자 한가운데라 대비로 바로 읽힌다.
+  const MARK = '255,255,255';
+  // 분석 표시를 얼마나 옅게 얹을지. 격자가 사진 위에 **얹혀 있다** 로
+  // 보여야지 덮으면 얼굴이 안 보인다. hologram_scan.dart 의 ScanTone.scrim
+  // 과 같은 값이어야 앱과 뷰어가 같은 농도로 보인다.
+  // 0.55 까지 내렸다가 1 로 되돌렸다 — **멀리서 보면 옅은 선이 사라진다.**
+  // 흰 후광이 선을 띄워 주므로 옅게 하지 않고도 얼굴이 비쳐 보인다.
+  const SCRIM = 1.0;
+  // 선 굵기 배수. 멀리서도 읽히게 한 단계 굵혔다.
+  const WEIGHT = 1.3;
 
   // (짚는 지점, 라벨 지점, 이름). 전부 0~1 비율.
   // 위에서 아래 순서다 — 스캔선이 내려가는 방향과 같아야 훑으면서 하나씩
   // 잡는 것으로 읽힌다. 라벨은 좌우로 번갈아 두고 세로로 벌린다.
+  // (구울 때의 키, 잰 값이 없을 때의 자리, 라벨 자리, 화면에 쓰는 이름).
+  // 키와 이름이 다르다 — 좌우를 나눠 구웠지만 라벨에는 "눈썹" 이라고만 쓴다.
   const ZONES = [
-    [[0.52, 0.285], [0.87, 0.13], '이마'],
-    [[0.38, 0.345], [0.12, 0.25], '눈썹'],
-    [[0.62, 0.395], [0.87, 0.36], '눈가'],
-    [[0.355, 0.495], [0.12, 0.47], '볼'],
-    [[0.50, 0.505], [0.87, 0.58], '코'],
-    [[0.50, 0.585], [0.12, 0.69], '입술'],
-    [[0.53, 0.655], [0.87, 0.80], '턱선'],
+    ['이마', [0.52, 0.285], [0.87, 0.13], '이마'],
+    ['오른쪽눈썹', [0.38, 0.345], [0.12, 0.25], '눈썹'],
+    ['왼쪽눈가', [0.62, 0.395], [0.87, 0.36], '눈가'],
+    ['오른쪽볼', [0.355, 0.495], [0.12, 0.47], '볼'],
+    ['코', [0.50, 0.505], [0.87, 0.58], '코'],
+    ['입술', [0.50, 0.585], [0.12, 0.69], '입술'],
+    ['턱선', [0.53, 0.655], [0.87, 0.80], '턱선'],
   ];
   const ZONE_AT = i => 0.05 + i * 0.125;
   const ZONE_LOCK = 0.13 * 0.55;
@@ -494,7 +477,8 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   const telemetry = document.getElementById('telemetry');
   const card = document.getElementById('card');
   const shot = document.getElementById('shot');
-  const cards = document.getElementById('cards');
+  const rregion = document.getElementById('rregion');
+  const rline = document.getElementById('rline');
   const tcount = document.getElementById('tcount');
   const lamp = document.getElementById('lamp');
   const tcoord = document.getElementById('tcoord');
@@ -504,6 +488,7 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   const photo = new Image();
   photo.src = "__PHOTO__";
   const HOLO_SRC = "__HOLO__";
+  const RHOLO_SRC = "__RHOLO__";
   holo.addEventListener('load', fit);
   holo.src = HOLO_SRC;
 
@@ -539,6 +524,22 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       u.onend = u.onerror = () => { audio.hum.volume = 0.5; };
       speechSynthesis.speak(u);
     } catch (e) { /* 소리는 장식이다 */ }
+  }
+
+  // 어두운 선 뒤에 까는 흰 후광. 굵고 흐린 흰 선을 먼저 긋고 그 위에 진한
+  // 선을 얹으면 배경이 무엇이든 선이 떠 보인다 — 밝은 테두리 + 어두운 심지라
+  // **금속을 새긴 것처럼** 읽히고, 무엇보다 멀리서도 선이 살아 있다.
+  // 이름을 haloStroke 로 둔다. `halo` 는 이미 후광 div 를 담고 있어서
+  // 같은 이름을 쓰면 **스크립트가 통째로 파싱 실패**한다.
+  function haloStroke(c, path, width, alpha) {
+    c.save();
+    c.strokeStyle = `rgba(${HALO},${Math.min(1, alpha * 0.85)})`;
+    c.lineWidth = width + 2.2;
+    c.lineJoin = 'round';
+    c.shadowColor = `rgba(${HALO},${Math.min(1, alpha)})`;
+    c.shadowBlur = 3;
+    c.stroke(path);
+    c.restore();
   }
 
   // 격자가 사진 안에서 차지하는 사각형. 아바타를 이 자리에 맞춘다.
@@ -612,12 +613,24 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   // <img> 를 그대로 틀고 짚는 점은 **고정 좌표로 둔다** — 어긋난 채 움직이는
   // 것보다 안 움직이는 게 낫다.
   let shownFrame = -1;   // 캔버스에 그려져 있는 프레임 (-1 이면 아직 없음)
+  let still = null;      // 스캔 바가 없는 0 번 장 (결과 화면용)
   let decoding = false;
+
+  function b64ToBytes(b64) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
 
   async function startDecoder() {
     if (!('ImageDecoder' in window)) return;
     try {
-      const buf = await (await fetch(HOLO_SRC)).arrayBuffer();
+      // **fetch 를 쓰지 않는다.** 게시된 아티팩트는 CSP 가 빡빡해서 data: URI
+      // 로의 요청까지 막힐 수 있고, 그러면 디코더가 통째로 실패해서 짚는 점이
+      // 고정 좌표로 떨어지고 결과 화면의 아바타도 안 그려진다.
+      // base64 는 어차피 문서 안에 들어 있으니 그냥 푼다.
+      const buf = b64ToBytes(HOLO_SRC.slice(HOLO_SRC.indexOf(',') + 1));
       const dec = new ImageDecoder({ data: buf, type: 'image/webp' });
       // completed 만 기다리면 안 된다. 트랙 목록은 따로 준비돼서,
       // 바로 selectedTrack 을 읽으면 null 이다 (여기서 한 번 걸렸다).
@@ -641,6 +654,13 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       await draw(0);
       plate.classList.add('decoded');
 
+      // 0 번은 **정면이고 스캔 바가 머리 밖에 있다.** 결과 화면이 이 장을
+      // 쓴다 — 아바타가 계속 훑고 돌면 분석이 아직 안 끝난 것으로 보인다.
+      still = document.createElement('canvas');
+      still.width = holoc.width;
+      still.height = holoc.height;
+      still.getContext('2d').drawImage(holoc, 0, 0);
+
       const tick = async () => {
         const want = Math.floor((performance.now() / HOLO_LOOP) * HOLO_FRAMES)
                      % count;
@@ -657,16 +677,21 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
     } catch (e) { /* 못 하면 <img> 로 그대로 간다 */ }
   }
 
-  function zoneAnchors() {
-    // 그려진 프레임을 모르면 짚는 점을 움직이지 않는다.
-    if (!TRACK || !PLACE || shownFrame < 0) return null;
-    const row = TRACK.frames[shownFrame % TRACK.frames.length];
+  function zoneAt(frame) {
+    if (!TRACK || !PLACE) return null;
+    const row = TRACK.frames[frame % TRACK.frames.length];
     if (!row) return null;
-    return ZONES.map(([, , name]) => {
-      const i = TRACK.names.indexOf(name);
+    return ZONES.map(([key]) => {
+      const i = TRACK.names.indexOf(key);
       const uv = i < 0 ? null : row[i];
       return uv ? mapZone(uv[0], uv[1]) : null;
     });
+  }
+
+  function zoneAnchors() {
+    // 그려진 프레임을 모르면 짚는 점을 움직이지 않는다.
+    if (shownFrame < 0) return null;
+    return zoneAt(shownFrame);
   }
 
   function fit() {
@@ -704,11 +729,11 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       for (let i = 1; i < N; i++) {
         const big = i % 4 === 0, len = big ? 7 : 3.5;
         if (i === live || i === (live + N / 2) % N) {
-          ctx.strokeStyle = `rgba(${STRONG},${0.55 * gr})`; ctx.lineWidth = 1.2;
+          ctx.strokeStyle = `rgba(${FRAME},${0.6 * gr * SCRIM})`; ctx.lineWidth = 1.2 * WEIGHT;
         } else if (big) {
-          ctx.strokeStyle = `rgba(${LINE},${0.28 * gr})`; ctx.lineWidth = 1;
+          ctx.strokeStyle = `rgba(${FRAME},${0.3 * gr * SCRIM})`; ctx.lineWidth = WEIGHT;
         } else {
-          ctx.strokeStyle = `rgba(${MIST},${0.85 * gr})`; ctx.lineWidth = 1;
+          ctx.strokeStyle = `rgba(${MIST},${0.85 * gr * SCRIM})`; ctx.lineWidth = WEIGHT;
         }
         const x = w * i / N, y = h * i / N;
         ctx.beginPath();
@@ -756,25 +781,22 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
         collect(DATA.edges, grid);
         collect(DATA.contours, contour);
 
-        // 머리카락이나 어두운 옷 위에서도 보이도록 흰 받침을 먼저 깐다.
-        // 선이 얇을수록 이 받침이 중요해진다.
-        ctx.lineWidth = 1.0;
-        ctx.strokeStyle = `rgba(${MIST},0.30)`;
-        ctx.stroke(grid); ctx.stroke(contour);
+        // 흰 후광을 먼저 깐다. 어두운 선은 이래야 얼굴 위에서 떠 보인다.
+        haloStroke(ctx, grid, 0.7 * WEIGHT, 0.55 * SCRIM);
+        haloStroke(ctx, contour, 0.9 * WEIGHT, 0.7 * SCRIM);
+        haloStroke(ctx, front, 1.0 * WEIGHT, 0.7 * SCRIM);
 
-        // 반투명하게 그으면 뒤 사진과 섞여 채도가 날아가 회색으로 보인다.
-        // 얇게 유지하되 색은 거의 불투명하게 얹어야 하늘색으로 읽힌다.
-        ctx.lineWidth = 0.7;
-        ctx.strokeStyle = `rgba(${LINE},${0.88 + 0.12 * settle})`;
+        ctx.lineWidth = 0.7 * WEIGHT;
+        ctx.strokeStyle = `rgba(${LINE},${(0.88 + 0.12 * settle) * SCRIM})`;
         ctx.stroke(grid);
 
         // 이목구비는 한 단계 진하게. 격자가 성근 만큼 이 선들이 형태를 짊어진다.
-        ctx.lineWidth = 0.9; ctx.lineCap = 'round';
-        ctx.strokeStyle = `rgba(${STRONG},${0.92 + 0.08 * settle})`;
+        ctx.lineWidth = 0.9 * WEIGHT; ctx.lineCap = 'round';
+        ctx.strokeStyle = `rgba(${STRONG},${(0.92 + 0.08 * settle) * SCRIM})`;
         ctx.stroke(contour);
 
-        ctx.lineWidth = 1.0;
-        ctx.strokeStyle = `rgb(${STRONG})`;
+        ctx.lineWidth = 1.0 * WEIGHT;
+        ctx.strokeStyle = `rgba(${STRONG},${SCRIM})`;
         ctx.stroke(front);
         ctx.lineCap = 'butt';
       }
@@ -782,9 +804,9 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       // 잡힌 점은 피부 위 하이라이트로 찍는다. 테두리를 두르면 하이라이트가
       // 아니라 얼굴에 박힌 구슬처럼 보인다 — 번짐과 심지 두 겹이면 충분하다.
       ctx.save();
-      ctx.shadowColor = `rgba(${GLINT},0.95)`;
+      ctx.shadowColor = `rgba(${GLINT},${0.95 * SCRIM})`;
       ctx.shadowBlur = 10;
-      ctx.fillStyle = `rgb(${GLINT})`;
+      ctx.fillStyle = `rgba(${GLINT},${SCRIM})`;
       for (let i = 0; i < revealed; i++) {
         const [nx, ny] = DATA.points[i];
         const age = Math.min(1, (revealed - i) / 6);
@@ -818,15 +840,15 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
 
       // 카드 테두리 한 줄. 흰 바탕 위의 흰 카드라 이게 있어야 면이 선다.
       ctx.beginPath(); ctx.roundRect(0.5, 0.5, w - 1, h - 1, 17);
-      ctx.strokeStyle = '#EFE2E5'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = '#E1E5E9'; ctx.lineWidth = 1; ctx.stroke();
       ctx.restore();
     }
 
     const br = seg(t, 0, 0.18);
     if (br > 0) {
       const len = 22 * br, i2 = 10;
-      ctx.strokeStyle = `rgba(${LINE},${0.6 * br})`;
-      ctx.lineWidth = 1.0; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.strokeStyle = `rgba(${FRAME},${0.6 * br * SCRIM})`;
+      ctx.lineWidth = 1.0 * WEIGHT; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       const L = i2, R = w - i2, T = i2, B = h - i2;
       for (const pts of [
         [[L, T + len], [L, T], [L + len, T]],
@@ -854,8 +876,10 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
 
     // 구울 때 잰 값이 있으면 그걸 쓴다 — 얼굴이 도는 것까지 들어 있다.
     const tracked = zoneAnchors();
+    // 첫 장 자리. 라벨을 얼마나 밀지 재는 기준이다.
+    const rests = tracked ? zoneAt(0) : null;
 
-    ZONES.forEach(([an, ln, name], i) => {
+    ZONES.forEach(([key, an, ln, name], i) => {
       const at = ZONE_AT(i);
       const on = Math.min(1, Math.max(0, (amount - at) / 0.13));
       if (on <= 0) return;
@@ -865,12 +889,19 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       const hit = tracked && tracked[i];
       const ax = hit ? hit[0] : (ox + (an[0] - ox) * ZOOM) * w;
       const ay = hit ? hit[1] : (oy + (an[1] - oy) * ZOOM) * h;
-      const lx = ln[0] * w, ly = ln[1] * h;
+
+      // 라벨도 얼굴을 따라 움직인다. 짚는 점만 움직이고 이름표가 붙박이면
+      // 둘이 따로 노는 것으로 보인다. 다만 **덜 움직인다** — 라벨은 좌우
+      // 끝에 붙어 있어서 같은 폭으로 밀면 화면을 넘어간다.
+      const rest = rests && rests[i];
+      const dxl = (hit && rest) ? (hit[0] - rest[0]) * 0.55 : 0;
+      const dyl = (hit && rest) ? (hit[1] - rest[1]) * 0.55 : 0;
+      const lx = ln[0] * w + dxl, ly = ln[1] * h + dyl;
       // 짚는 점만 움직이므로 어느 쪽으로 끌지도 매 프레임 다시 본다.
       const toRight = lx > ax;
 
-      hctx.strokeStyle = `rgba(${LINE},${0.75 * on})`;
-      hctx.lineWidth = 0.7;
+      hctx.strokeStyle = `rgba(${FRAME},${0.75 * on * SCRIM})`;
+      hctx.lineWidth = 0.7 * WEIGHT;
       hctx.beginPath();
       hctx.moveTo(ax, ay);
       if (on > 0.55) {
@@ -887,8 +918,8 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       // '표시해 뒀다' 이지만, 조여 들어오면 지금 재고 있다로 읽힌다.
       const close = Math.min(1, on / 0.55);
       const half = 11 - 6.4 * close, arm = 3.4;
-      hctx.strokeStyle = `rgba(${STRONG},${0.85 * on})`;
-      hctx.lineWidth = 1.0; hctx.lineCap = 'round';
+      hctx.strokeStyle = `rgba(${STRONG},${0.85 * on * SCRIM})`;
+      hctx.lineWidth = 1.0 * WEIGHT; hctx.lineCap = 'round';
       hctx.beginPath();
       for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
         const cx = ax + half * sx, cy = ay + half * sy;
@@ -900,10 +931,10 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       hctx.lineCap = 'butt';
 
       if (close >= 1) {
-        hctx.fillStyle = `rgba(255,255,255,${0.9 * on})`;
+        hctx.fillStyle = `rgba(${GLINT},${0.9 * on * SCRIM})`;
         hctx.beginPath(); hctx.arc(ax, ay, 2.6, 0, Math.PI * 2); hctx.fill();
-        hctx.strokeStyle = `rgba(${STRONG},${0.9 * on})`;
-        hctx.lineWidth = 0.9;
+        hctx.strokeStyle = `rgba(${STRONG},${0.9 * on * SCRIM})`;
+        hctx.lineWidth = 0.9 * WEIGHT;
         hctx.beginPath(); hctx.arc(ax, ay, 2.6, 0, Math.PI * 2); hctx.stroke();
       }
 
@@ -915,7 +946,7 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       hctx.textAlign = toRight ? 'left' : 'right';
       const tx = toRight ? lx + 6 : lx - 6;
       hctx.font = '700 11.5px "Noto Sans KR", sans-serif';
-      hctx.fillStyle = `rgba(${STRONG},${fade})`;
+      hctx.fillStyle = `rgba(${FRAME},${fade})`;
       hctx.fillText(name, tx, ly - 6);
       hctx.font = '9px "Noto Sans KR", sans-serif';
       hctx.fillStyle = `rgba(${LABEL},${fade})`;
@@ -926,19 +957,23 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
 
   // ---- 결과 화면 ----------------------------------------------------------
   //
-  // 부위 이름 → 사진에서의 자리. 손으로 어림한 값이 아니라 앱과 **같은 표**다
-  // (`ProblemSpot._zoneTable`, demo_face_points.json 의 실제 랜드마크에서 뽑았다).
-  // 눈대중으로 넣었더니 입술이 턱 아래, 볼이 목에 찍혔다.
-  const ZONE_BOX = {
-    '이마': [0.266, 0.223, 0.745, 0.345],
-    '왼쪽 눈썹': [0.535, 0.284, 0.730, 0.359],
-    '오른쪽 눈썹': [0.270, 0.302, 0.471, 0.376],
-    '왼쪽 볼': [0.634, 0.385, 0.764, 0.547],
-    '오른쪽 볼': [0.239, 0.410, 0.392, 0.526],
-    '코': [0.437, 0.354, 0.594, 0.532],
-    '입술': [0.415, 0.528, 0.621, 0.615],
-    '턱선': [0.332, 0.586, 0.672, 0.687],
-  };
+  // 문제가 있는 자리를 **아바타 위에 빛으로 켠다.** 색을 칠하면 "여기에 뭘
+  // 발랐다" 로 읽히지만 빛은 "여기를 보라" 로 읽힌다. 더하기 합성으로 얹어서
+  // 아래 피부색이 그대로 살아 있게 한다 — 안 그러면 뭐가 문제인지 안 보인다.
+  //
+  // 부위 이름 → 구울 때 쓴 키. 좌우가 안 적혀 있으면 한쪽으로 몰아 준다.
+  function zoneKey(region) {
+    const r = region.replace(/ /g, '');
+    const side = (r.includes('왼') || r.includes('좌')) ? '왼쪽' : '오른쪽';
+    if (r.includes('이마')) return '이마';
+    if (r.includes('눈썹')) return side + '눈썹';
+    if (r.includes('눈')) return side + '눈가';
+    if (r.includes('볼') || r.includes('뺨')) return side + '볼';
+    if (r.includes('코')) return '코';
+    if (r.includes('입술') || r.includes('입')) return '입술';
+    if (r.includes('턱')) return '턱선';
+    return null;
+  }
 
   // 화면 구성을 보여 주기 위한 **예시** 문장이다. 실제 앱에서는 서버가 준
   // region/state/action 이 그대로 들어간다 — 여기서 지어낸 수치는 없다.
@@ -949,90 +984,173 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
   ];
 
   let picked = null;
+  let resultRaf = 0;
 
   function drawShot() {
     const box = shot.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    shot.width = Math.round(box.width * dpr);
-    shot.height = Math.round(box.height * dpr);
-    const cx = shot.getContext('2d');
-    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const w = box.width, h = box.height;
     if (!w || !h) return;
-
-    // object-fit: cover 와 같은 셈.
-    const iw = photo.naturalWidth || 3, ih = photo.naturalHeight || 4;
-    const sc = Math.max(w / iw, h / ih);
-    const dx = (w - iw * sc) / 2, dy = (h - ih * sc) / 2;
+    shot.width = Math.round(w * dpr);
+    shot.height = Math.round(h * dpr);
+    const cx = shot.getContext('2d');
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cx.clearRect(0, 0, w, h);
-    if (photo.complete) cx.drawImage(photo, dx, dy, iw * sc, ih * sc);
-    const map = (nx, ny) => [nx * iw * sc + dx, ny * ih * sc + dy];
 
-    // **네모로 칠하지 않는다.** 테두리를 두른 구역은 "여기를 정확히 쟀다" 는
-    // 말이 되고, 무엇보다 어디가 문제인지가 아니라 네모가 먼저 보인다.
-    // 가운데가 진하고 밖으로 스미는 얼룩이라야 "이 언저리" 로 읽히고,
-    // 화장품 앱에도 맞는 언어다. 번호도 안 붙인다 — 자리에 색이 번져 있으면
-    // 카드의 이름만으로 바로 이어진다.
-    const INK = 0.46;
-    FINDINGS.forEach(([region], i) => {
-      const b = ZONE_BOX[region];
-      if (!b) return;
-      const [x0, y0] = map(b[0], b[1]), [x1, y1] = map(b[2], b[3]);
-      const rw = (x1 - x0) / 2, rh = (y1 - y0) / 2;
-      const mx = x0 + rw, my = y0 + rh;
+    // 아바타는 분석 화면에서 돌고 있는 캔버스를 그대로 옮겨 그린다.
+    // 숨겨져 있어도 그림은 계속 갱신되므로 프레임이 살아 있다.
+    //
+    // 디코더를 못 쓰는 환경에서는 <img> 를 그대로 옮겨 그린다. 여기서 물러서지
+    // 않으면 결과 화면의 아바타 자리가 통째로 비어 버린다.
+    const side = Math.min(w, h);
+    const ox = (w - side) / 2, oy = (h - side) / 2;
+    const src = rFrame >= 0 ? rholo : (still || (holo.complete ? holo : null));
+    if (src) cx.drawImage(src, ox, oy, side, side);
 
-      // 고른 게 있으면 그것만 한 단계 올리고 나머지는 확실히 내린다. 둘의
-      // 차이가 작으면 눌러도 아무것도 안 짚힌 것처럼 보인다. 그래도 아주
-      // 지우지는 않는다 — 흔적이 없으면 "다른 데도 있었나" 를 알 수 없다.
-      const ink = picked === null ? INK
-                : (picked === i ? INK * 1.5 : INK * 0.28);
+    // **삼각형 모양 그대로 밝힌다.** 동그란 빛은 얼굴 위에 얹힌 남의 도형이지만,
+    // 삼각형은 방금 분석 화면에서 얼굴을 덮고 있던 바로 그 격자다.
+    // 결과용 판의 그 프레임 자리를 쓴다.
+    const T = (rFrame >= 0 && RTRACK) ? RTRACK : TRACK;
+    const at2 = rFrame >= 0 ? rFrame : 0;
+    const pts = (T && T.mesh) ? T.mesh[at2 % T.mesh.length] : null;
+    const key = zoneKey(FINDING[0]);
+    const tris = (pts && key && T.tris) ? T.tris[key] : null;
+    if (!tris || !tris.length) return;
 
-      cx.save();
-      cx.translate(mx, my);
-      cx.scale(1, rh / rw);
-      const g = cx.createRadialGradient(0, 0, 0, 0, 0, rw);
-      g.addColorStop(0, `rgba(255,122,146,${ink})`);
-      g.addColorStop(0.55, `rgba(255,141,161,${ink * 0.72})`);
-      g.addColorStop(1, 'rgba(255,141,161,0)');
-      cx.fillStyle = g;
-      cx.beginPath();
-      cx.arc(0, 0, rw, 0, Math.PI * 2);
-      cx.fill();
-      cx.restore();
-    });
+    const path = new Path2D();
+    for (const t of tris) {
+      if (t.some(i => !pts[i])) continue;
+      const a = pts[t[0]], b = pts[t[1]], c = pts[t[2]];
+      path.moveTo(ox + a[0] * side, oy + a[1] * side);
+      path.lineTo(ox + b[0] * side, oy + b[1] * side);
+      path.lineTo(ox + c[0] * side, oy + c[1] * side);
+      path.closePath();
+    }
+
+    cx.save();
+    // 면은 더하기로 얹어 빛으로 읽히게 하되 세기는 낮게 — 진하면 그 자리
+    // 피부가 안 보여서 뭐가 문제인지 판단할 수가 없다.
+    // **더하기(lighter)가 아니라 그냥 얹는다.** 흰색을 더하면 밝은 피부 위에서
+    // 곧바로 흰색에 붙어 스티커가 되고 그 안의 삼각형도 같이 사라진다.
+    cx.shadowColor = `rgba(${MARK},0.9)`;
+    cx.shadowBlur = 14;
+    cx.fillStyle = `rgba(${MARK},0.22)`;
+    cx.fill(path);
+    cx.shadowBlur = 0;
+    // 얼굴이 비쳐 보일 만큼만. 꽉 채우면 흰 스티커가 된다.
+    cx.fillStyle = `rgba(${MARK},0.42)`;
+    cx.fill(path);
+    cx.restore();
+
+    // 밝은 띠가 비스듬히 훑고 지나간다. **두 줄**이다 — 좁고 아주 밝은 앞줄에
+    // 넓고 옅은 뒷줄이 따라붙어야 금속에 빛이 스치는 것처럼 보인다.
+    const span = side;
+    const ph = ((performance.now() / 1400) % 1);
+    cx.save();
+    cx.clip(path);
+    for (const [lead, wide, peak] of [[0, 0.62, 0.55], [0.16, 0.24, 1]]) {
+      const at = -span + (((ph + lead) % 1)) * span * 2;
+      const g2 = cx.createLinearGradient(
+        ox + at, oy + at, ox + at + span * wide, oy + at + span * wide);
+      g2.addColorStop(0, `rgba(${MARK},0)`);
+      g2.addColorStop(0.5, `rgba(${MARK},${peak})`);
+      g2.addColorStop(1, `rgba(${MARK},0)`);
+      cx.fillStyle = g2;
+      cx.fillRect(0, 0, w, h);
+    }
+    cx.restore();
+
+    // 테두리도 같이 숨 쉰다. 면만 반짝이면 윤곽은 죽은 채로 남는다.
+    const pulse = 0.55 + 0.45 * Math.sin(ph * 2 * Math.PI);
+    cx.save();
+    cx.strokeStyle = `rgba(${MARK},${0.9 * pulse})`;
+    cx.lineWidth = 2.6 * WEIGHT;
+    cx.lineJoin = 'round';
+    cx.shadowColor = `rgba(${MARK},${pulse})`;
+    cx.shadowBlur = 8;
+    cx.stroke(path);
+    cx.restore();
+
+    // 삼각형의 변. **어두운 선**이어야 흰 면 위에서 보인다.
+    cx.strokeStyle = `rgba(${FRAME},0.9)`;
+    cx.lineWidth = 1.1 * WEIGHT;
+    cx.lineJoin = 'round';
+    cx.stroke(path);
   }
 
-  function buildCards() {
-    cards.innerHTML = '';
-    FINDINGS.forEach(([region, state, action], i) => {
-      const el = document.createElement('button');
-      el.className = 'rcard';
-      el.innerHTML = `<b>${region}</b><span>${state}</span><i>${action}</i>`;
-      el.addEventListener('click', () => {
-        picked = picked === i ? null : i;
-        [...cards.children].forEach((c, j) =>
-          c.classList.toggle('on', picked === j));
-        drawShot();
-        // 앱은 여기서 TTS 로 한 번 더 알려 준다. 화면을 못 보면 짚어 준 게
-        // 안 보이기 때문이다.
-        speak(picked === null ? '전체를 다시 보여 드릴게요.'
-                              : `${region}. ${state}`);
-      });
-      cards.append(el);
-    });
+  // 결과용 아바타. 스캔 바가 없는 판을 따로 돌린다.
+  const rholo = document.createElement('canvas');
+  rholo.width = rholo.height = 384;
+  let rFrame = -1, rDecoding = false;
+
+  async function startResultDecoder() {
+    if (!('ImageDecoder' in window)) return;
+    try {
+      const buf = b64ToBytes(RHOLO_SRC.slice(RHOLO_SRC.indexOf(',') + 1));
+      const dec = new ImageDecoder({ data: buf, type: 'image/webp' });
+      await dec.tracks.ready;
+      await dec.completed;
+      const track = dec.tracks.selectedTrack;
+      const count = (track && track.frameCount) || HOLO_FRAMES;
+      const c2 = rholo.getContext('2d');
+
+      const step = async () => {
+        const want = Math.floor((performance.now() / HOLO_LOOP) * HOLO_FRAMES)
+                     % count;
+        if (!rDecoding && want !== rFrame
+            && card.classList.contains('done')) {
+          rDecoding = true;
+          try {
+            const { image } = await dec.decode({ frameIndex: want });
+            c2.clearRect(0, 0, rholo.width, rholo.height);
+            c2.drawImage(image, 0, 0, rholo.width, rholo.height);
+            image.close();
+            rFrame = want;
+          } catch (e) { /* 한 장 놓쳐도 다음 장에서 따라잡는다 */ }
+          rDecoding = false;
+        }
+        requestAnimationFrame(step);
+      };
+      // 첫 장은 미리 그려 둔다. 결과로 넘어간 순간 빈 자리가 없어야 한다.
+      const { image } = await dec.decode({ frameIndex: 0 });
+      c2.drawImage(image, 0, 0, rholo.width, rholo.height);
+      image.close();
+      rFrame = 0;
+      requestAnimationFrame(step);
+    } catch (e) { /* 못 하면 분석용 판으로 물러선다 */ }
+  }
+
+  // 결과를 보는 동안에도 아바타는 계속 돈다. 멈춰 있으면 방금까지 살아 있던
+  // 화면이 갑자기 정지 사진이 된다.
+  function resultLoop() {
+    if (!card.classList.contains('done')) { resultRaf = 0; return; }
+    drawShot();
+    resultRaf = requestAnimationFrame(resultLoop);
+  }
+
+  // **한 가지만 보여 준다.** 여러 부위를 돌려 가며 띄우면 화면이 계속 바뀌고
+  // TTS 도 그때마다 다시 말한다 — 언제 끝나는지 알 수 없는 소리가 된다.
+  const FINDING = FINDINGS[0];
+
+  function showFinding() {
+    picked = 0;
+    rregion.textContent = FINDING[0];
+    rline.textContent = FINDING[1];
+    drawShot();
   }
 
   function showResult() {
     card.classList.add('done');
     setStep(3);
-    buildCards();
-    // 두 번 그린다. 지금 한 번 — rAF 로만 그리면 화면 뒤에 있는 탭에서는
-    // 영영 안 그려져서 사진 자리가 빈 채로 남는다. 그리고 다음 프레임에 한
-    // 번 더 — 방금 display 를 바꿔서 지금 잰 크기는 아직 예전 값이다.
-    drawShot();
-    requestAnimationFrame(drawShot);
+
+    // 지금 한 번 그린다 — rAF 로만 그리면 화면 뒤에 있는 탭에서는 영영 안
+    // 그려져서 자리가 빈 채로 남는다. 크기는 방금 display 를 바꿔서 아직
+    // 예전 값일 수 있으므로, 이어지는 루프가 다음 프레임에 다시 잰다.
+    showFinding();
+    if (!resultRaf) resultRaf = requestAnimationFrame(resultLoop);
     playBtn.textContent = '처음부터 다시';
-    speak('메이크업 분석이 끝났어요.');
+    // 딱 한 번만 말한다. 부위와 문장까지 같이 실어서 이 한 마디로 끝낸다.
+    speak(`메이크업 분석이 끝났어요. ${FINDING[0]}. ${FINDING[1]}`);
   }
 
   let raf = 0, startedAt = 0, cues = new Set();
@@ -1078,11 +1196,6 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
       () => play('blip')));
 
     const prog = Math.min(1, elapsed / RUN);
-    // 기다리는 동안 한 번 더. 서버가 오래 걸릴 때 말이 끊기면 멈춘 줄 안다.
-    if (prog >= 0.62 && !cues.has('say2')) {
-      cues.add('say2');
-      speak('피부를 꼼꼼히 보는 중이에요.');
-    }
     fill.style.width = (prog * 100) + '%';
     statusline.textContent = STATUS_LINE;
 
@@ -1125,6 +1238,7 @@ HTML = """<title>BeautyTalk 얼굴 스캔</title>
     }
   });
   startDecoder();
+  startResultDecoder();
   window.addEventListener('resize', () => { fit(); drawShot(); });
   photo.addEventListener('load', fit);
   fit();
@@ -1168,6 +1282,41 @@ def wrap(html):
             .replace("__BODY__", html[cut:]))
 
 
+def check_js(html):
+    """구운 html 의 스크립트를 문법만이라도 확인한다.
+
+    한 글자 틀리면 **스크립트가 통째로 안 돌고 화면은 멀쩡해 보인다** —
+    버튼만 안 눌리므로 눈으로는 못 잡는다. 실제로 헬퍼 이름이 기존 변수와
+    겹쳐서 통째로 파싱 실패한 걸 모르고 내보냈다.
+
+    node 가 없으면 조용히 넘어간다. 있으면 공짜로 한 겹 막아 준다.
+    """
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+
+    node = shutil.which("node")
+    if not node:
+        print("[artifact] node 가 없어 문법 검사를 건너뛴다")
+        return
+
+    blocks = re.findall(r"<script>(.*?)</script>", html, re.S)
+    if not blocks:
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "check.js")
+        with open(path, "w", encoding="utf-8") as fp:
+            fp.write(blocks[-1])
+        done = subprocess.run([node, "--check", path],
+                              capture_output=True, text=True)
+    if done.returncode != 0:
+        raise SystemExit(
+            "[artifact] 스크립트 문법 오류 — 굽지 않았다\n"
+            + (done.stderr or "").strip())
+    print("[artifact] 스크립트 문법 확인")
+
+
 def main():
     html = (HTML
             .replace("__OVERLAY__", json.dumps(overlay, separators=(",", ":")))
@@ -1176,8 +1325,14 @@ def main():
             .replace("__TRACK__",
                      json.dumps(track, ensure_ascii=False,
                                 separators=(",", ":")))
+            .replace("__RTRACK__",
+                     json.dumps(rtrack, ensure_ascii=False,
+                                separators=(",", ":")))
+            .replace("__RHOLO__", asset("face_hologram_result.webp"))
             .replace("__PHOTO__", asset("demo_face.jpg"))
             .replace("__HOLO__", asset("face_hologram.webp")))
+
+    check_js(html)
 
     if args.standalone:
         html = wrap(html)

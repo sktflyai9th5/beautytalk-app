@@ -16,6 +16,18 @@
         "lib/preview_main.dart"
       ],
       "port": 8080
+    },
+    {
+      "name": "viewers",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8791",
+        "--directory",
+        "build/viewers"
+      ],
+      "port": 8791
     }
   ]
 }
